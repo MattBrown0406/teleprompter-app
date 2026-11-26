@@ -18,6 +18,9 @@ final class SpeechFollower: ObservableObject {
 
     /// Called on the main thread with every word heard in the current pass.
     var onWords: (([String]) -> Void)?
+    /// Called on the main thread with the full transcript of the current pass so far, with timing.
+    /// Each call replaces the previous one for the same pass. Used by practice mode.
+    var onTranscript: ((HeardPass) -> Void)?
 
     private let recognizer = SFSpeechRecognizer() ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private let lock = NSLock()
@@ -111,6 +114,13 @@ final class SpeechFollower: ObservableObject {
                 // Ignore a pass we already replaced or cancelled.
                 guard let self, self.wanted, pass == self.generation else { return }
                 if let result {
+                    if let onTranscript = self.onTranscript {
+                        onTranscript(HeardPass(
+                            id: pass, started: started,
+                            segments: result.bestTranscription.segments.map {
+                                HeardSegment(text: $0.substring, start: $0.timestamp, duration: $0.duration)
+                            }))
+                    }
                     self.onWords?(result.bestTranscription.segments.flatMap { ScriptWords.keys($0.substring) })
                     if !result.bestTranscription.segments.isEmpty { self.quickFailures = 0 }
                 }
@@ -156,4 +166,18 @@ final class SpeechFollower: ObservableObject {
         }
         return Array(result.prefix(100))
     }
+}
+
+/// One word or phrase the recognizer heard, timed from the start of its pass.
+struct HeardSegment {
+    let text: String
+    let start: TimeInterval
+    let duration: TimeInterval
+}
+
+/// What one recognition pass has heard so far.
+struct HeardPass {
+    let id: Int
+    let started: Date
+    let segments: [HeardSegment]
 }

@@ -19,6 +19,9 @@ The Record tab of Cueframe (placeholder name): a teleprompter camera for 9:16 an
 | ScriptStore.swift / ScriptLibraryView.swift | Saved scripts (Documents/Scripts.json), write, paste, import .txt/.rtf |
 | TakeReviewView.swift | Play back a take; save to Photos, share, edit, retake |
 | RecorderSettings.swift / RecorderSettingsView.swift | Saved preferences |
+| Practice.swift | Practice mode: timing, pace, filler words, pauses, script coverage, report and per-script history |
+| SeriesRecording.swift | Record a series: pick scripts and order, file each take to its own editor project, summary |
+| BackgroundEffect.swift | Live background blur, color or photo (Vision person segmentation + Core Image), picker and preview |
 
 How it records
 - Takes are written to `MediaLibrary.recordings` as .mp4, HEVC by default (H.264 in settings). 1080p is about 11 Mbps HEVC / 16 Mbps H.264, 4K about 35 / 50 Mbps.
@@ -36,6 +39,26 @@ Teleprompter
 - Eye-contact layout (on by default): upright, the script is a short band about 3 lines tall and 74% wide right under the lens, read line at the top. Sideways, it is a column a third of the screen wide on the lens side, read line just above the middle, and the controls move to the other side.
 - Record in parts: each paragraph is a part. A kept take moves you to the next part. The Takes list lets you star the best take of each part, re-record a part, and join the best takes in the editor.
 
+Practice mode
+- The Record / Practice switch above the record button. In Practice the button is blue: the script scrolls and you are timed and listened to, but nothing is recorded.
+- After a run: real run time against the word-count estimate, words a minute (long pauses left out; 130 to 175 counts as natural), filler words (um, uh, like, basically, actually, literally, honestly, you know, I mean, kind of, sort of, and a few more), pauses over 2 seconds, and how much of the script you got through. Fillers the script itself uses aren't counted.
+- Each script keeps its last 10 runs, and the report compares with the previous one.
+- Uses the same speech recognizer as Follow my voice (shared when that is on, its own otherwise). Apple's recognizer often drops "um" and "uh", so those counts are a floor. Without the microphone or speech permission, only the run time is measured.
+
+Record a series
+- Scripts, +, Record a series: tick scripts, reorder, choose Back to back or not, Start.
+- Each kept take becomes its own project in the Edit tab, named after its script, with the script attached for captions.
+- Not back to back: the normal take review after each script (retake as often as you like; Keep files it and loads the next script).
+- Back to back: no review. Each take is filed as soon as you stop, then an "Up next" card and a countdown (at least 3 s) roll into the next script.
+- The bar under the top buttons shows "Series 2 of 5" with Skip and End. When it ends, a list of the projects made opens, each one tap from the editor.
+- Record in parts is switched off during a series.
+
+Background effect (no green screen)
+- The person button in the top bar: Off, Blur (with strength), Color (includes chroma green and blue for keying later) or Photo (from your library).
+- Vision person segmentation (balanced quality) runs on every frame on the camera queue; Core Image blends you over the new background on the GPU. The blur runs at quarter size. The effect is burned into the take, and the preview shows the processed frames, so what you see is what records.
+- Can't be changed while recording; a change made then applies after the take.
+- Speed: the segmentation model works at a small fixed size, so 4K costs mostly in the final blend and the encoder. If a frame takes over about 26 ms the mask is refreshed every other frame; over 33 ms the screen suggests switching to 1080p. 1080p should be fine on recent iPhones; 4K at 30 fps live is unproven until it runs on a real phone.
+
 Remotes
 - Apple Watch: record/stop, pause take, scroll/pause script, rewind, speed. Needs the Record tab open on the iPhone.
 - AirPods or headphones: play/pause starts or pauses the script.
@@ -46,4 +69,4 @@ Script helper: Scripts, +, Write with AI (or Tighten with AI in the script edito
 
 Hand-off: "Edit" calls `EditorLauncher.open(urls:canvas:quality:)` after the review closes.
 
-Not yet tested on a device, including voice following, the Watch app, headphone and volume-button remotes. Needs to be built in Xcode (or CI) and tried on an iPhone.
+Not yet tested on a device, including practice mode, series recording, the background effect, voice following, the Watch app, headphone and volume-button remotes. Needs to be built in Xcode (or CI) and tried on an iPhone.

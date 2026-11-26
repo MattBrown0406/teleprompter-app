@@ -48,6 +48,10 @@ final class RecorderSettings: ObservableObject {
     @Published var eyeContactLayout: Bool { didSet { defaults.set(eyeContactLayout, forKey: Keys.eyeContact) } }
     /// Record the script one paragraph at a time and join the best take of each.
     @Published var recordBySection: Bool { didSet { defaults.set(recordBySection, forKey: Keys.bySection) } }
+    /// Blur, color or photo behind you, without a green screen.
+    @Published var background: BackgroundEffect {
+        didSet { if let data = try? JSONEncoder().encode(background) { defaults.set(data, forKey: Keys.background) } }
+    }
 
     static let speedRange: ClosedRange<Double> = 10...400
     static let fontRange: ClosedRange<Double> = 18...96
@@ -73,6 +77,7 @@ final class RecorderSettings: ObservableObject {
         followVoice = d.object(forKey: Keys.followVoice) as? Bool ?? true
         eyeContactLayout = d.object(forKey: Keys.eyeContact) as? Bool ?? true
         recordBySection = d.bool(forKey: Keys.bySection)
+        background = d.data(forKey: Keys.background).flatMap { try? JSONDecoder().decode(BackgroundEffect.self, from: $0) } ?? BackgroundEffect()
     }
 
     func adjustSpeed(by delta: Double) {
@@ -89,5 +94,6 @@ final class RecorderSettings: ObservableObject {
         static let opacity = "rec.opacity", height = "rec.height", grid = "rec.grid"
         static let autoScroll = "rec.autoScroll", center = "rec.center"
         static let followVoice = "rec.followVoice", eyeContact = "rec.eyeContact", bySection = "rec.bySection"
+        static let background = "rec.background"
     }
 }
