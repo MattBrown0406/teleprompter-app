@@ -35,6 +35,8 @@ final class RemoteHub: NSObject, ObservableObject {
             center.pauseCommand.removeTarget(target)
         }
         commandTargets = []
+        // Don't leave the teleprompter on the lock screen after leaving the recorder.
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
     private var scrollWatch: AnyCancellable?

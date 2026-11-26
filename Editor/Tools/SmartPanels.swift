@@ -81,6 +81,9 @@ struct AutoCutPanel: View {
                 cuts = result.cuts
                 transcript = result.transcript
                 analysed = true
+                if let problem = result.speechProblem {
+                    session.message = "Only pauses were checked. \(problem)"
+                }
             } catch {
                 session.message = error.localizedDescription
             }
@@ -307,8 +310,12 @@ struct CaptionsPanel: View {
                 } label: { Label("Add at playhead", systemImage: "plus") }
                 .font(.caption.bold())
                 Spacer()
-                if !session.captionItems.isEmpty, let url = srtFile() {
-                    ShareLink(item: url) { Label(".srt file", systemImage: "square.and.arrow.up") }.font(.caption.bold())
+                if !session.captionItems.isEmpty {
+                    // The file is written only when shared, not on every redraw during playback.
+                    ShareLink(item: SubtitleFile(project: session.project), preview: SharePreview("Subtitles (.srt)")) {
+                        Label(".srt file", systemImage: "square.and.arrow.up")
+                    }
+                    .font(.caption.bold())
                 }
             }
             if session.captionItems.isEmpty {
@@ -334,10 +341,23 @@ struct CaptionsPanel: View {
         }
     }
 
-    private func srtFile() -> URL? {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(session.project.name).srt")
-        try? Captioner.srt(session.project).write(to: url, atomically: true, encoding: .utf8)
-        return url
+}
+
+/// The project's captions as a SubRip file, made when the share sheet asks for it.
+struct SubtitleFile: Transferable {
+    let project: EditProject
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: UTType(filenameExtension: "srt") ?? .plainText) { file in
+            let allowed = CharacterSet.alphanumerics.union(.init(charactersIn: " -_"))
+            var name = file.project.name.components(separatedBy: allowed.inverted).joined()
+            if name.trimmingCharacters(in: .whitespaces).isEmpty { name = "Subtitles" }
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent(name).appendingPathExtension("srt")
+            try Captioner.srt(file.project).write(to: url, atomically: true, encoding: .utf8)
+            return SentTransferredFile(url)
+        }
     }
 }
 

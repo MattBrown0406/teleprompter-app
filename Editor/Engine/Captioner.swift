@@ -106,9 +106,12 @@ enum Captioner {
         }
         flush()
         // Hold each caption until the next one starts (no flicker), capped at the video end.
+        // Never past the next start either: fast speech (one word per caption) would stack two on screen.
         for i in items.indices {
             let next = i + 1 < items.count ? items[i + 1].start : duration
-            items[i].end = min(max(items[i].end, min(next, items[i].end + 0.8)), duration)
+            var end = min(max(items[i].end, min(next, items[i].end + 0.8)), duration)
+            if next > items[i].start + 0.05 { end = min(end, next) }
+            items[i].end = end
         }
         return items.filter { $0.end > $0.start }
     }

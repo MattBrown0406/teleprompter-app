@@ -36,7 +36,23 @@ enum AudioCleaner {
         level(&x)
         limit(&x, ceiling: 0.89)
         if let progress { await progress(0.9) }
-        try write(x, to: out)
+        // The reader starts at the first sound sample. When the sound track starts a little after the
+        // video (common in recorded takes), put that gap back so the voice stays in sync with the lips.
+        if let track = try? await AVURLAsset(url: source).loadTracks(withMediaType: .audio).first,
+           let range = try? await track.load(.timeRange), range.start.seconds.isFinite, range.start.seconds > 0.001 {
+            x.insert(contentsOf: repeatElement(0, count: Int((range.start.seconds * sampleRate).rounded())), at: 0)
+        }
+        // Write next to the final name and move it in, so an interrupted run never leaves
+        // a half-written file that a later run would reuse.
+        let partial = out.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".caf")
+        do {
+            try write(x, to: partial)
+            try? FileManager.default.removeItem(at: out)
+            try FileManager.default.moveItem(at: partial, to: out)
+        } catch {
+            try? FileManager.default.removeItem(at: partial)
+            throw error
+        }
         if let progress { await progress(1) }
         return out
     }

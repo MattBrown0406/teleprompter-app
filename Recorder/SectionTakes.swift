@@ -13,14 +13,27 @@ final class SectionSession: ObservableObject {
 
     private var script = ""
 
-    /// Splits the script into sections at blank lines. Keeps takes when the script hasn't changed.
+    /// Splits the script into sections at blank lines. Parts whose text didn't change keep their takes,
+    /// so fixing a typo in one paragraph doesn't throw away the others.
     func load(script newScript: String) {
         guard newScript != script else { return }
+        let oldSections = sections, oldTakes = takes, oldChosen = chosen
+        let oldCurrentText = currentText
         script = newScript
         sections = Self.split(newScript)
-        takes = Array(repeating: [], count: sections.count)
-        chosen = [:]
-        current = 0
+        var newTakes = Array(repeating: [URL](), count: sections.count)
+        var newChosen: [Int: URL] = [:]
+        var used = Set<Int>()
+        for (i, text) in sections.enumerated() {
+            guard let j = oldSections.indices.first(where: { !used.contains($0) && oldSections[$0] == text }),
+                  oldTakes.indices.contains(j) else { continue }
+            used.insert(j)
+            newTakes[i] = oldTakes[j]
+            newChosen[i] = oldChosen[j]
+        }
+        takes = newTakes
+        chosen = newChosen
+        current = sections.firstIndex(of: oldCurrentText) ?? min(current, max(0, sections.count - 1))
     }
 
     var currentText: String { sections.indices.contains(current) ? sections[current] : "" }

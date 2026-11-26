@@ -43,6 +43,37 @@ final class ProjectStore: ObservableObject {
     func delete(_ project: EditProject) {
         try? FileManager.default.removeItem(at: file(for: project.id))
         projects.removeAll { $0.id == project.id }
+        // Free the space its media took, unless another project (a duplicate) or the brand kit uses it.
+        let stillUsed = projects.reduce(into: Self.brandFiles()) { $0.formUnion(Self.files(of: $1)) }
+        for path in Self.files(of: project).subtracting(stillUsed) {
+            let url = MediaLibrary.resolve(path)
+            // Only files the app made inside its own folders.
+            guard url.standardizedFileURL.path.hasPrefix(MediaLibrary.documents.standardizedFileURL.path) else { continue }
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// True when a saved project uses this file, so it must not be deleted.
+    func uses(_ url: URL) -> Bool {
+        let path = MediaLibrary.relativePath(url)
+        return projects.contains { Self.files(of: $0).contains(path) }
+    }
+
+    /// Every media file a project points at, as stored paths.
+    nonisolated static func files(of p: EditProject) -> Set<String> {
+        var out = Set<String>()
+        for c in p.clips where !c.isBrandClip {
+            out.insert(c.path)
+            if let clean = c.cleanAudioPath { out.insert(clean) }
+        }
+        for a in p.audio { out.insert(a.path) }
+        if let logo = p.logo?.path { out.insert(logo) }
+        return out
+    }
+
+    private static func brandFiles() -> Set<String> {
+        guard let kit = BrandStore.shared.kit else { return [] }
+        return Set([kit.logoPath, kit.introPath, kit.outroPath, kit.customFontPath].compactMap { $0 })
     }
 
     func duplicate(_ project: EditProject) {

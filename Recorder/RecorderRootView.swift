@@ -68,6 +68,11 @@ struct RecorderRootView: View {
             }
             .onChange(of: geo.size) { _, _ in updateCameraSide() }
         }
+        // Turning the phone from one sideways position to the other keeps the same size,
+        // so watch the rotation itself to keep the script beside the lens.
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            DispatchQueue.main.async { updateCameraSide() }
+        }
         .toolbar(isBusy ? .hidden : .visible, for: .tabBar)
         .statusBarHidden(isBusy)
         .persistentSystemOverlays(isBusy ? .hidden : .automatic)
@@ -151,7 +156,10 @@ struct RecorderRootView: View {
                 url: take.url,
                 sessionTakes: sessionTakes,
                 onRetake: {
-                    try? FileManager.default.removeItem(at: take.url)
+                    // A take already opened in the editor stays on disk, or that project loses its clip.
+                    if !ProjectStore.shared.uses(take.url) {
+                        try? FileManager.default.removeItem(at: take.url)
+                    }
                     sessionTakes.removeAll { $0 == take.url }
                     sections.remove(take.url)
                     engine.rewind()
@@ -586,7 +594,10 @@ struct RecorderRootView: View {
         guard let urls = editAfterReview, !urls.isEmpty else { return }
         editAfterReview = nil
         engine.rewind()
-        EditorLauncher.open(urls: urls, canvas: settings.canvas, quality: camera.activeQuality)
+        // The script goes along so captions use its exact words and post copy knows the topic.
+        let script = scriptBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        EditorLauncher.open(urls: urls, canvas: settings.canvas, quality: camera.activeQuality,
+                            script: script.isEmpty ? nil : scriptBody)
     }
 }
 

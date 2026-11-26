@@ -44,6 +44,8 @@ enum AutoCut {
     struct Analysis {
         var cuts: [Cut]
         var transcript: String
+        /// Set when speech recognition failed, so only silences could be found.
+        var speechProblem: String?
     }
 
     static let fillers: Set<String> = ["um", "umm", "uh", "uhh", "uhm", "er", "erm", "ah", "ahh", "hmm", "mm", "mhm"]
@@ -53,15 +55,24 @@ enum AutoCut {
                         progress: @escaping @MainActor (String, Double) -> Void) async throws -> Analysis {
         var cuts: [Cut] = []
         var transcript: [String] = []
+        var speechProblem: String?
         let clips = project.clips.filter { !$0.isBrandClip && $0.trimmedDuration > 0.5 }
         for (n, clip) in clips.enumerated() {
             let label = clips.count > 1 ? "Clip \(n + 1) of \(clips.count): " : ""
             await progress(label + "listening…", Double(n) / Double(clips.count))
             let asset = AVURLAsset(url: clip.url)
             let range = CMTimeRange(start: clip.trimStart.cmTime, duration: clip.trimmedDuration.cmTime)
-            let words = (try? await Transcriber.transcribe(asset: asset, range: range) { p in
-                progress(label + "listening…", (Double(n) + p * 0.7) / Double(clips.count))
-            }) ?? []
+            var words: [SpokenWord] = []
+            do {
+                words = try await Transcriber.transcribe(asset: asset, range: range) { p in
+                    progress(label + "listening…", (Double(n) + p * 0.7) / Double(clips.count))
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // Still find the pauses, but say why fillers and retakes weren't checked.
+                speechProblem = error.localizedDescription
+            }
             transcript.append(words.map(\.text).joined(separator: " "))
             await progress(label + "finding pauses…", (Double(n) + 0.8) / Double(clips.count))
             let rate = 16_000.0
@@ -71,7 +82,7 @@ enum AutoCut {
             cuts += findCuts(clip: clip, words: words, levels: levels, window: window, options: options)
         }
         await progress("Done", 1)
-        return Analysis(cuts: cuts, transcript: transcript.joined(separator: " "))
+        return Analysis(cuts: cuts, transcript: transcript.joined(separator: " "), speechProblem: speechProblem)
     }
 
     static func findCuts(clip: ClipItem, words: [SpokenWord], levels: [Float], window: Double, options: Options) -> [Cut] {
