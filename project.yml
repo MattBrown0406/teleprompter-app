@@ -55,8 +55,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.mattbrown0406.cueframe
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
-        SUPABASE_URL: ""
-        SUPABASE_PUBLISHABLE_KEY: ""
+        SUPABASE_URL: "https://ubbuenuirzpkdmakihrk.supabase.co"
+        SUPABASE_PUBLISHABLE_KEY: "sb_publishable_lHqP3mzoUJbjwIqGvpps_A_y-4gNbVz"
 
   CueframeWatch:
     type: application

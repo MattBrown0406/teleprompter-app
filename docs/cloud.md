@@ -32,6 +32,8 @@ The Supabase project must have **Authentication → Sign In / Providers → Allo
 
 ## Turning it on
 
+The app uses the Supabase project **CueFrame** (`ubbuenuirzpkdmakihrk`, us-east-2), where the migration is applied.
+
 Set two build settings in `project.yml` (target `Cueframe`):
 
 ```yaml
