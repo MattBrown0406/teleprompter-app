@@ -46,6 +46,8 @@ final class RecorderSettings: ObservableObject {
     @Published var followVoice: Bool { didSet { defaults.set(followVoice, forKey: Keys.followVoice) } }
     /// Script in a narrow band right next to the lens, so your eyes stay on the viewer.
     @Published var eyeContactLayout: Bool { didSet { defaults.set(eyeContactLayout, forKey: Keys.eyeContact) } }
+    /// Record the script one paragraph at a time and join the best take of each.
+    @Published var recordBySection: Bool { didSet { defaults.set(recordBySection, forKey: Keys.bySection) } }
 
     static let speedRange: ClosedRange<Double> = 10...400
     static let fontRange: ClosedRange<Double> = 18...96
@@ -70,6 +72,7 @@ final class RecorderSettings: ObservableObject {
         centerText = d.object(forKey: Keys.center) as? Bool ?? true
         followVoice = d.object(forKey: Keys.followVoice) as? Bool ?? true
         eyeContactLayout = d.object(forKey: Keys.eyeContact) as? Bool ?? true
+        recordBySection = d.bool(forKey: Keys.bySection)
     }
 
     func adjustSpeed(by delta: Double) {
@@ -85,6 +88,6 @@ final class RecorderSettings: ObservableObject {
         static let countdown = "rec.countdown", speed = "rec.speed", font = "rec.font", mirror = "rec.mirror"
         static let opacity = "rec.opacity", height = "rec.height", grid = "rec.grid"
         static let autoScroll = "rec.autoScroll", center = "rec.center"
-        static let followVoice = "rec.followVoice", eyeContact = "rec.eyeContact"
+        static let followVoice = "rec.followVoice", eyeContact = "rec.eyeContact", bySection = "rec.bySection"
     }
 }

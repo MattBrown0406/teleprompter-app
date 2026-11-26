@@ -6,6 +6,9 @@ struct RecorderRootView: View {
     @StateObject private var camera = CameraController()
     @StateObject private var settings = RecorderSettings()
     @StateObject private var scripts = ScriptStore()
+    @StateObject private var remote = RemoteHub()
+    @StateObject private var sections = SectionSession()
+    @State private var showSectionTakes = false
     /// @State on purpose: the engine publishes every frame, and only the script view should redraw.
     @State private var engine = PrompterEngine()
 
@@ -27,6 +30,11 @@ struct RecorderRootView: View {
 
     private var isRecording: Bool { camera.state == .recording || camera.state == .paused }
     private var isBusy: Bool { camera.state != .idle || countdownValue != nil }
+    private var scriptBody: String { scripts.selected?.body ?? "" }
+    private var bySection: Bool { settings.recordBySection && !scriptBody.isEmpty }
+    /// The whole script, or just the part being recorded.
+    private var prompterText: String { bySection ? sections.currentText : scriptBody }
+
     /// Voice following needs the microphone; without it the script scrolls at a fixed speed.
     private var voiceActive: Bool { settings.followVoice && camera.microphoneAllowed }
     private var orientationMatches: Bool { camera.isPortraitHold == settings.canvas.isPortrait }
@@ -35,6 +43,8 @@ struct RecorderRootView: View {
         GeometryReader { geo in
             ZStack {
                 Color.black.ignoresSafeArea()
+                // Volume buttons and Bluetooth selfie remotes.
+                .background { VolumeButtonRemote(onCommand: handleRemote).allowsHitTesting(false) }
 
                 if camera.permission == .denied {
                     permissionView
@@ -78,6 +88,10 @@ struct RecorderRootView: View {
             engine.followsVoice = voiceActive
             camera.setAudioTap { [engine] buffer in engine.appendAudio(buffer) }
             updateCameraSide()
+            remote.onCommand = handleRemote
+            remote.observe(engine)
+            remote.start()
+            sendRemoteStatus()
             keyboardFocus = true
             if camera.permission == .unknown {
                 camera.start(front: settings.useFrontCamera, quality: settings.quality)
@@ -90,6 +104,7 @@ struct RecorderRootView: View {
             if isRecording { stopRecording() }
             engine.pause()
             camera.setAudioTap(nil)
+            remote.stop()
             camera.stopSession()
         }
         .onChange(of: settings.scrollSpeed) { _, speed in engine.speed = speed }
@@ -97,10 +112,13 @@ struct RecorderRootView: View {
         .onChange(of: settings.useFrontCamera) { _, front in camera.configure(front: front, quality: settings.quality) }
         .onChange(of: settings.quality) { _, quality in camera.configure(front: settings.useFrontCamera, quality: quality) }
         .onChange(of: scripts.selectedID) { _, _ in engine.rewind() }
+        .onChange(of: scriptBody, initial: true) { _, text in sections.load(script: text) }
+        .onChange(of: sections.current) { _, _ in engine.rewind() }
         .onChange(of: camera.finishedTake) { _, url in
             guard let url else { return }
             camera.finishedTake = nil
             sessionTakes.append(url)
+            if bySection { sections.add(url) }
             review = Take(url: url)
         }
         .onChange(of: scenePhase) { _, phase in
@@ -123,7 +141,9 @@ struct RecorderRootView: View {
         // The camera can stop a take by itself (interruption, error); stop the script with it.
         .onChange(of: camera.state) { _, state in
             if state == .finishing { cancelCountdown(); engine.pause() }
+            sendRemoteStatus()
         }
+        .onChange(of: voiceActive) { _, _ in sendRemoteStatus() }
         .sheet(isPresented: $showScripts) { ScriptLibraryView(store: scripts) }
         .sheet(isPresented: $showSettings) { RecorderSettingsView(settings: settings, supports4K: camera.supports4K) }
         .fullScreenCover(item: $review, onDismiss: openEditorIfRequested) { take in
@@ -133,6 +153,7 @@ struct RecorderRootView: View {
                 onRetake: {
                     try? FileManager.default.removeItem(at: take.url)
                     sessionTakes.removeAll { $0 == take.url }
+                    sections.remove(take.url)
                     engine.rewind()
                     review = nil
                 },
@@ -142,9 +163,21 @@ struct RecorderRootView: View {
                 },
                 onKeep: {
                     engine.rewind()
+                    // On to the next part once this one has a take.
+                    if bySection, sections.chosen[sections.current] == take.url { sections.next() }
                     review = nil
                 }
             )
+        }
+        .sheet(isPresented: $showSectionTakes, onDismiss: openEditorIfRequested) {
+            SectionTakesView(
+                session: sections,
+                onRecordPart: { sections.current = $0 },
+                onJoin: { editAfterReview = $0 })
+        }
+        // Takes play back in that list too, so the camera lets go of the audio meanwhile.
+        .onChange(of: showSectionTakes) { _, shown in
+            if shown { camera.stopSession() } else if review == nil { camera.startSession() }
         }
     }
 
@@ -164,8 +197,10 @@ struct RecorderRootView: View {
                          height: min(max(settings.fontSize * 1.28 * 3.4 + 12, 96), geo.size.height * 0.3),
                          readingLine: 0)
                 topBar
+                sectionStrip
             } else {
                 topBar
+                sectionStrip
                 if showPrompter {
                     prompter(width: nil, height: geo.size.height * settings.prompterHeight, readingLine: nil)
                         .padding(.horizontal, 10)
@@ -187,10 +222,17 @@ struct RecorderRootView: View {
         .frame(maxWidth: .infinity)
     }
 
+    @ViewBuilder private var sectionStrip: some View {
+        if bySection && !isRecording {
+            SectionStrip(session: sections) { showSectionTakes = true }
+                .disabled(countdownValue != nil)
+        }
+    }
+
     private func prompter(width: CGFloat?, height: CGFloat, readingLine: CGFloat?) -> some View {
         TeleprompterView(
             engine: engine,
-            text: scripts.selected?.body ?? "",
+            text: prompterText,
             fontSize: settings.fontSize,
             mirrored: settings.mirrorText,
             centered: settings.centerText,
@@ -458,6 +500,24 @@ struct RecorderRootView: View {
     private var lineStep: CGFloat { settings.fontSize * 1.3 }
 
     // MARK: Actions
+
+    /// Commands from the Watch, headphones and volume buttons.
+    private func handleRemote(_ command: RemoteCommand) {
+        // Remotes shouldn't act behind a sheet or the take review.
+        guard review == nil, !showScripts, !showSettings, !showSectionTakes else { return }
+        switch command {
+        case .toggleScroll: engine.toggle()
+        case .record: recordTapped()
+        case .togglePauseRecording: togglePause()
+        case .rewind: engine.rewind()
+        case .faster: settings.adjustSpeed(by: 10)
+        case .slower: settings.adjustSpeed(by: -10)
+        }
+    }
+
+    private func sendRemoteStatus() {
+        remote.setRecorder(recording: isRecording, paused: camera.state == .paused, followsVoice: voiceActive)
+    }
 
     private func recordTapped() {
         switch camera.state {

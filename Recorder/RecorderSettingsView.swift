@@ -32,10 +32,11 @@ struct RecorderSettingsView: View {
                 Section {
                     Toggle("Follow my voice", isOn: $settings.followVoice)
                     Toggle("Eye-contact layout", isOn: $settings.eyeContactLayout)
+                    Toggle("Record in parts", isOn: $settings.recordBySection)
                 } header: {
                     Text("Teleprompter")
                 } footer: {
-                    Text("Follow my voice listens as you read and keeps the script at your pace, waiting when you pause. It runs on the phone when the phone supports it. Eye-contact layout puts the script in a narrow band right next to the camera, so you look at the viewer, not the screen.")
+                    Text("Follow my voice listens as you read and keeps the script at your pace, waiting when you pause. It runs on the phone when the phone supports it. Eye-contact layout puts the script in a narrow band right next to the camera, so you look at the viewer, not the screen. Record in parts splits the script at blank lines: record each part until you're happy, then join the best take of each.")
                 }
 
                 Section {
