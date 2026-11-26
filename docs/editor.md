@@ -11,6 +11,13 @@ Native Swift, SwiftUI and AVFoundation, iOS 17+. Lives in `Editor/`, shares `App
 - **Text**: any number of text layers; 6 font styles, color, size, plain/box/pill background, outline, shadow, alignment; animations fade, pop, rise, typewriter. Drag, pinch, twist in the preview; drag/resize its bar on the timeline.
 - **Auto captions**: on-device speech recognition of the clips' sound, grouped into short timed captions (words per caption, caps, position). Each caption is a normal editable text layer; "use this style for all captions".
 - **Audio**: music from Files or the sound of any video in Photos; voiceover recorded at the playhead while the video plays muted. Per-sound volume, fade in/out, loop, split, move, trim. "Lower all clip sound to 30%" for music beds.
+- **Auto-cut mistakes** (Auto-cut tool): finds dead air at the start and end, pauses over a chosen length, "um"/"uh" and lines you started again. Review each cut (tap to hear it, untick to keep), then cut them all in one tap. One undo step brings them back.
+- **Post everywhere** (Export): tick 9:16, 1:1, 4:5 and 16:9 to export one file per shape from the same edit. "Keep my face centred" finds your face (Vision, on device) and makes the crop follow it. Also in the Canvas panel.
+- **Animated captions**: word-by-word looks (Highlight, Word box, One word, Reveal, Plain). With a script (passed by the recorder or picked from saved scripts), captions use the script's exact words, timed to the speech. Style all captions at once: font (including the brand font), colours, spoken-word colour, size, background, outline.
+- **Subtitles**: add lines at the playhead, edit any line's words, share an .srt file.
+- **Brand kit** (Edit tab, seal icon, or the Brand tool): logo with corner, size and opacity; three colours; font style or an imported .ttf/.otf; intro and outro clips; optional "add to every new video".
+- **Clean audio**: high-pass for rumble, spectral noise reduction from the quiet parts of the take, voice leveling to about -18 dBFS and a peak limiter. Light, Standard or Strong. Makes a separate sound file; the original stays and undo switches back.
+- **AI help** (AI tool): post caption and hashtags for TikTok, Instagram or Facebook (works offline with on-device keyword hashtags when no key is set); fix caption words; add a hook title. Uses the Anthropic or OpenAI key from AI settings (Shared/AISettingsView, stored in the Keychain).
 - **Undo/redo** for every edit (slider drags count as one step).
 - **Export**: 1080p or 4K, 30 fps, H.264 or HEVC, .mp4. Exact canvas size (1080x1920, 2160x3840, etc). Save to Photos or share sheet (TikTok, Instagram, Facebook).
 
@@ -33,4 +40,4 @@ Pick your team under Signing, then run on your iPhone. Speech captions need a re
 - No built-in music library (licensing); Apple Music songs can't be used because they're copy protected.
 
 ## Not in v1 (good next steps)
-Stickers/emoji, picture-in-picture overlay clips, keyframe animation, automatic music ducking under voiceover, beat sync, chroma key, caption word highlighting, templates, drafts in iCloud.
+Stickers/emoji, picture-in-picture overlay clips, keyframe animation, automatic music ducking under voiceover, beat sync, chroma key, templates, drafts in iCloud.
