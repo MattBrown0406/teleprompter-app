@@ -38,11 +38,11 @@ final class RenderPlan: @unchecked Sendable {
     let textCache = TextImageCache()
     private var logos: [String: CIImage] = [:]
 
-    /// The brand logo, loaded once per plan.
+    /// The brand logo (or a B-roll photo), loaded once per plan.
     func logoImage(_ path: String) -> CIImage? {
         lock.lock(); defer { lock.unlock() }
         if let hit = logos[path] { return hit }
-        guard let img = CIImage(contentsOf: MediaLibrary.resolve(path)) else { return nil }
+        guard let img = CIImage(contentsOf: MediaLibrary.resolve(path), options: [.applyOrientationProperty: true]) else { return nil }
         logos[path] = img
         return img
     }
@@ -76,16 +76,30 @@ final class CompositorInstruction: NSObject, AVVideoCompositionInstructionProtoc
     let from: LayerRef
     let to: LayerRef?           // set during a transition
     let transition: TransitionKind
+    /// The whole transition, for working out its progress (an instruction can be split by B-roll).
+    let transitionRange: CMTimeRange
+    /// B-roll videos showing during this instruction: overlay id to its source track.
+    let overlayTracks: [UUID: CMPersistentTrackID]
 
-    init(timeRange: CMTimeRange, plan: RenderPlan, from: LayerRef, to: LayerRef? = nil, transition: TransitionKind = .none) {
+    init(timeRange: CMTimeRange, plan: RenderPlan, from: LayerRef, to: LayerRef? = nil, transition: TransitionKind = .none,
+         transitionRange: CMTimeRange? = nil, overlayTracks: [UUID: CMPersistentTrackID] = [:]) {
         self.timeRange = timeRange
         self.plan = plan
         self.from = from
         self.to = to
         self.transition = transition
+        self.transitionRange = transitionRange ?? timeRange
+        self.overlayTracks = overlayTracks
         var ids = [NSNumber(value: from.trackID)]
         if let to { ids.append(NSNumber(value: to.trackID)) }
+        for id in Set(overlayTracks.values) where !ids.contains(NSNumber(value: id)) { ids.append(NSNumber(value: id)) }
         self.requiredSourceTrackIDs = ids
+    }
+
+    /// The same instruction over part of its time, with the B-roll that shows then.
+    func piece(_ range: CMTimeRange, overlays: [UUID: CMPersistentTrackID]) -> CompositorInstruction {
+        CompositorInstruction(timeRange: range, plan: plan, from: from, to: to, transition: transition,
+                              transitionRange: transitionRange, overlayTracks: overlays)
     }
 }
 
@@ -155,6 +169,37 @@ enum CompositionBuilder {
             if i < project.clips.count - 1 { cursor = cursor - project.transitionDuration(after: i).cmTime }
         }
 
+        // B-roll videos go on their own tracks (two, so one can start as another ends).
+        // Their sound is left out: the talking head's voice keeps playing.
+        var overlayTrackOf: [UUID: CMPersistentTrackID] = [:]
+        var overlayRanges: [(id: UUID, range: CMTimeRange)] = []
+        var lanes: [(track: AVMutableCompositionTrack, end: CMTime)] = []
+        let videoEnd = cursor
+        for ov in project.overlayItems.filter({ $0.kind == .video }).sorted(by: { $0.start < $1.start }) {
+            let at = ov.start.cmTime
+            guard at < videoEnd else { continue }
+            let asset = AVURLAsset(url: ov.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+            guard let vTrack = try? await asset.loadTracks(withMediaType: .video).first,
+                  let props = try? await vTrack.load(.preferredTransform, .naturalSize),
+                  let srcRange = try? await vTrack.load(.timeRange) else { continue }
+            let (transform, natural) = props
+            let len = min(ov.duration, srcRange.end.seconds - ov.sourceStart, (videoEnd - at).seconds)
+            guard len > 0.1 else { continue }
+            var lane = lanes.firstIndex { $0.end <= at }
+            if lane == nil, lanes.count < 2,
+               let t = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) {
+                lanes.append((t, .zero))
+                lane = lanes.count - 1
+            }
+            guard let k = lane else { continue }   // more than two at once: skip the extra
+            let src = CMTimeRange(start: ov.sourceStart.cmTime, duration: len.cmTime)
+            do { try insert(vTrack, range: src, into: lanes[k].track, at: at, scaledTo: len.cmTime) } catch { continue }
+            lanes[k].end = at + len.cmTime
+            overlayTrackOf[ov.id] = lanes[k].track.trackID
+            infos[ov.id] = ClipRenderInfo(preferredTransform: transform, naturalSize: natural)
+            overlayRanges.append((ov.id, CMTimeRange(start: at, duration: len.cmTime)))
+        }
+
         let plan = RenderPlan(project: project, renderSize: size, clipInfo: infos)
 
         // Video instructions: pass segments and transition segments, contiguous.
@@ -171,6 +216,29 @@ enum CompositionBuilder {
                 instructions.append(CompositorInstruction(timeRange: CMTimeRange(start: starts[i + 1], end: ends[i]),
                                                           plan: plan, from: layer, to: next, transition: clip.transitionOut))
             }
+        }
+
+        // Split instructions where B-roll starts or stops, so each one asks only for the tracks it shows.
+        if !overlayRanges.isEmpty {
+            var split: [CompositorInstruction] = []
+            for ins in instructions {
+                let r = ins.timeRange
+                var points = [r.start, r.end]
+                for o in overlayRanges {
+                    for p in [o.range.start, o.range.end] where p > r.start && p < r.end { points.append(p) }
+                }
+                points.sort { $0 < $1 }
+                var unique: [CMTime] = []
+                for p in points where unique.last.map({ $0 != p }) ?? true { unique.append(p) }
+                for (a, b) in zip(unique, unique.dropFirst()) where b > a {
+                    let piece = CMTimeRange(start: a, end: b)
+                    let mid = a + CMTimeMultiplyByFloat64(piece.duration, multiplier: 0.5)
+                    var active: [UUID: CMPersistentTrackID] = [:]
+                    for o in overlayRanges where o.range.containsTime(mid) { active[o.id] = overlayTrackOf[o.id] }
+                    split.append(ins.piece(piece, overlays: active))
+                }
+            }
+            instructions = split
         }
 
         let vc = AVMutableVideoComposition()
@@ -272,6 +340,9 @@ enum CompositionBuilder {
                     c.cleanAudioPath ?? ""]
         }
         for a in p.audio { key.append(a) }
+        for o in p.overlayItems where o.kind == .video {
+            key += [o.id, o.path, o.start, o.duration, o.sourceStart]
+        }
         return key
     }
 }

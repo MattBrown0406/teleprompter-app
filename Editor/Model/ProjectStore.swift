@@ -96,12 +96,16 @@ final class ProjectStore: ObservableObject {
         }
         for a in p.audio { out.insert(a.path) }
         if let logo = p.logo?.path { out.insert(logo) }
+        for o in p.overlayItems { out.insert(o.path) }
+        for h in p.hooks ?? [] { if let c = h.clip { out.insert(c.path) } }
         return out
     }
 
     private static func brandFiles() -> Set<String> {
-        guard let kit = BrandStore.shared.kit else { return [] }
-        return Set([kit.logoPath, kit.introPath, kit.outroPath, kit.customFontPath].compactMap { $0 })
+        // Templates keep their music, logo, intro and outro even after the project they came from is gone.
+        let templates = TemplateStore.allFiles
+        guard let kit = BrandStore.shared.kit else { return templates }
+        return templates.union([kit.logoPath, kit.introPath, kit.outroPath, kit.customFontPath].compactMap { $0 })
     }
 
     func duplicate(_ project: EditProject) {

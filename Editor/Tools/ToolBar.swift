@@ -26,6 +26,10 @@ struct ToolBar: View {
                     tool("Edit", "character.cursor.ibeam") { pick(.textStyle) }
                     tool("Copy", "plus.square.on.square") { session.duplicateSelection() }
                     tool("Delete", "trash", tint: .red) { session.deleteSelection() }
+                case .overlay:
+                    tool("Edit", "slider.horizontal.3") { pick(.overlayEdit) }
+                    tool("Copy", "plus.square.on.square") { session.duplicateSelection() }
+                    tool("Delete", "trash", tint: .red) { session.deleteSelection() }
                 case .audio:
                     tool("Volume", "speaker.wave.2") { pick(.audioEdit) }
                     tool("Split", "scissors") { splitAudio() }
@@ -34,6 +38,9 @@ struct ToolBar: View {
                 case .none:
                     tool("Auto-cut", "wand.and.stars") { pick(.autoCut) }
                     tool("Captions", "captions.bubble") { pick(.captions) }
+                    tool("B-roll", "photo.stack") { pick(.broll) }
+                    tool("Hooks", "flag.2.crossed") { pick(.hooks) }
+                    tool("Templates", "square.grid.2x2") { pick(.templates) }
                     tool("Canvas", "aspectratio") { pick(.canvas) }
                     tool("Text", "textformat") { session.addText(); pick(.textStyle) }
                     tool("Clean audio", "waveform.badge.magnifyingglass") { pick(.cleanup) }
@@ -150,6 +157,10 @@ struct ToolPanel: View {
                 case .cleanup: CleanupPanel(session: session)
                 case .brand: BrandPanel(session: session)
                 case .ai: AIPanel(session: session)
+                case .broll: BRollPanel(session: session)
+                case .overlayEdit: OverlayPanel(session: session)
+                case .hooks: HookPanel(session: session)
+                case .templates: TemplatePanel(session: session)
                 case .addClip: EmptyView()
                 }
             }
@@ -179,6 +190,10 @@ struct ToolPanel: View {
         case .cleanup: return "Clean up audio"
         case .brand: return "Brand kit"
         case .ai: return "AI help"
+        case .broll: return "B-roll and cutaways"
+        case .overlayEdit: return "B-roll"
+        case .hooks: return "Hook test"
+        case .templates: return "Templates"
         case .addClip: return "Add"
         }
     }

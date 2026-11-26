@@ -27,6 +27,16 @@ struct EditProject: Codable, Identifiable, Equatable, Hashable {
     var postCopy: String?
     /// Set when the video was exported (or marked finished by hand). Nil means still in progress.
     var finishedAt: Date?
+    /// B-roll: photos and videos laid over the talking head while its sound keeps playing.
+    var overlays: [OverlayItem]?
+    /// Other opening lines for the same video. Each one exports as its own version.
+    var hooks: [HookVariant]?
+    /// The last clip of the original hook (the opening line). Nil until the hook is marked.
+    var hookEndClipID: UUID?
+    /// A template to apply once the clips' lengths are known (set for new videos with a default template).
+    var pendingTemplateID: UUID?
+    /// Caption style to auto-caption with when the editor opens (from a template).
+    var pendingCaptions: CaptionPreset?
 
     var isFinished: Bool { finishedAt != nil }
 
@@ -36,6 +46,7 @@ struct EditProject: Codable, Identifiable, Equatable, Hashable {
         var p = EditProject(name: "Video \(df.string(from: Date()))", canvas: canvas, quality: quality)
         p.clips = urls.map { ClipItem(url: $0) }
         BrandKit.applyIfAutomatic(to: &p)
+        p.pendingTemplateID = TemplateStore.defaultTemplateID
         return p
     }
 
