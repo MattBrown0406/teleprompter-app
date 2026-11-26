@@ -67,12 +67,15 @@ enum FrameRenderer {
         let canvasRect = CGRect(origin: .zero, size: size)
         let t = time.seconds
 
+        let starts = project.clipStarts
         func layerImage(_ ref: LayerRef) -> CIImage {
-            guard let clip = project.clips.first(where: { $0.id == ref.clipID }),
+            guard let index = project.clips.firstIndex(where: { $0.id == ref.clipID }),
                   let frame = source(ref.trackID) else {
                 return background(project.background, nil, size)
             }
-            return place(frame, clip: clip, info: plan.clipInfo[clip.id], project: project, size: size)
+            let clip = project.clips[index]
+            let sourceTime = clip.trimStart + (t - starts[index]) * clip.speed
+            return place(frame, clip: clip, info: plan.clipInfo[clip.id], project: project, size: size, sourceTime: sourceTime)
         }
 
         var image: CIImage
@@ -86,6 +89,10 @@ enum FrameRenderer {
             image = a
         }
 
+        let onBrandClip = project.clips.first(where: { $0.id == instruction.from.clipID })?.isBrandClip ?? false
+        if let logo = project.logo, !onBrandClip, let mark = plan.logoImage(logo.path) {
+            image = placeLogo(mark, logo: logo, size: size).composited(over: image)
+        }
         for item in project.texts where t >= item.start && t < item.end {
             if let overlay = TextOverlay.image(for: item, at: t, canvas: size, cache: plan.textCache) {
                 image = overlay.composited(over: image)
@@ -94,10 +101,32 @@ enum FrameRenderer {
         return image.cropped(to: canvasRect)
     }
 
+    static func placeLogo(_ mark: CIImage, logo: LogoOverlay, size: CGSize) -> CIImage {
+        let w = mark.extent.width, h = mark.extent.height
+        guard w > 0, h > 0 else { return mark }
+        let targetW = size.width * CGFloat(logo.size)
+        let s = targetW / w
+        let margin = size.width * 0.045
+        let lw = w * s, lh = h * s
+        let left = logo.corner == .topLeft || logo.corner == .bottomLeft
+        let top = logo.corner == .topLeft || logo.corner == .topRight
+        let x: CGFloat = left ? margin : size.width - lw - margin
+        // Core Image is y-up: "top" means a high y. Leave room for phone UI at the very top.
+        let y: CGFloat = top ? size.height - lh - margin * 1.6 : margin * 1.6
+        var img = mark.transformed(by: CGAffineTransform(translationX: -mark.extent.minX, y: -mark.extent.minY)
+            .concatenating(CGAffineTransform(scaleX: s, y: s))
+            .concatenating(CGAffineTransform(translationX: x, y: y)))
+        if logo.opacity < 0.999 {
+            img = img.applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(logo.opacity))])
+        }
+        return img
+    }
+
     static func ease(_ x: Double) -> Double { x < 0.5 ? 2 * x * x : 1 - pow(-2 * x + 2, 2) / 2 }
 
     /// Orients the source frame, applies filters, and fits it onto the canvas.
-    static func place(_ frame: CIImage, clip: ClipItem, info: ClipRenderInfo?, project: EditProject, size: CGSize) -> CIImage {
+    static func place(_ frame: CIImage, clip: ClipItem, info: ClipRenderInfo?, project: EditProject, size: CGSize,
+                      sourceTime: Double? = nil) -> CIImage {
         var img = frame.oriented(orientation(for: info?.preferredTransform ?? .identity))
         if clip.rotation % 4 != 0 {
             let turns: [CGImagePropertyOrientation] = [.up, .right, .down, .left]
@@ -111,8 +140,18 @@ enum FrameRenderer {
         let fitScale = clip.fit == .fill ? max(size.width / w, size.height / h) : min(size.width / w, size.height / h)
         let s: CGFloat = fitScale * CGFloat(clip.zoom)
         var placed = img.transformed(by: CGAffineTransform(scaleX: s, y: s))
-        let dx: CGFloat = (size.width - w * s) / 2 + CGFloat(clip.offset.x) * size.width
-        let dy: CGFloat = (size.height - h * s) / 2 - CGFloat(clip.offset.y) * size.height
+        var baseX: CGFloat = (size.width - w * s) / 2
+        var baseY: CGFloat = (size.height - h * s) / 2
+        // Auto reframe: follow the face when the canvas crops the picture (e.g. 16:9 footage on 9:16).
+        if project.autoReframe == true, clip.fit == .fill, clip.rotation % 4 == 0,
+           let sourceTime, var face = clip.faces?.position(at: sourceTime) {
+            if clip.mirrored { face.x = 1 - face.x }
+            let c = FaceTracker.centering(face: face, imageSize: w * s, h * s, canvas: size)
+            baseX = c.dx
+            baseY = c.dy
+        }
+        let dx: CGFloat = baseX + CGFloat(clip.offset.x) * size.width
+        let dy: CGFloat = baseY - CGFloat(clip.offset.y) * size.height
         placed = placed.transformed(by: CGAffineTransform(translationX: dx, y: dy))
         placed = Filters.apply(clip.filter, amount: clip.filterAmount, adjust: clip.adjust, to: placed)
 

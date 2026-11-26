@@ -73,6 +73,20 @@ final class EditorSession: ObservableObject {
         afterChange()
     }
 
+    /// Updates the project without an undo step (analysis results such as face paths).
+    func applySilently(_ change: (inout EditProject) -> Void) {
+        var next = project
+        change(&next)
+        guard next != project else { return }
+        project = next
+        scheduleSave()
+        if let built, CompositionBuilder.structuralKey(project) == builtKey {
+            applyStyleChange(built)
+        } else {
+            scheduleRebuild()
+        }
+    }
+
     func undo() {
         guard let prev = undoStack.popLast() else { return }
         redoStack.append(project)

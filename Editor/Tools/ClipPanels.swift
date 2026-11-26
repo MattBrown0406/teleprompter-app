@@ -2,6 +2,28 @@ import SwiftUI
 import CoreImage
 import UIKit
 
+/// "Keep my face centred": finds the face once, then every canvas shape follows it.
+struct ReframeToggle: View {
+    @ObservedObject var session: EditorSession
+    @State private var working = false
+    @State private var progress = 0.0
+
+    var body: some View {
+        HStack {
+            Toggle("Keep my face centred", isOn: Binding(get: { session.project.autoReframe == true }, set: { on in
+                working = true
+                Task {
+                    await session.setAutoReframe(on) { p in progress = p }
+                    working = false
+                }
+            }))
+            .disabled(working)
+            if working { ProgressView(value: progress).frame(width: 60) }
+        }
+        .font(.caption)
+    }
+}
+
 struct CanvasPanel: View {
     @ObservedObject var session: EditorSession
     var body: some View {
@@ -21,6 +43,7 @@ struct CanvasPanel: View {
                 }
             }
             Text(session.project.canvas.label).font(.footnote).foregroundStyle(Theme.textDim)
+            ReframeToggle(session: session)
             Text("Pinch and drag the video in the preview to reframe a selected clip.")
                 .font(.caption).foregroundStyle(Theme.textDim)
         }

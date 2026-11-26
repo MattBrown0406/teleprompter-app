@@ -36,6 +36,16 @@ final class RenderPlan: @unchecked Sendable {
     let renderSize: CGSize
     let clipInfo: [UUID: ClipRenderInfo]
     let textCache = TextImageCache()
+    private var logos: [String: CIImage] = [:]
+
+    /// The brand logo, loaded once per plan.
+    func logoImage(_ path: String) -> CIImage? {
+        lock.lock(); defer { lock.unlock() }
+        if let hit = logos[path] { return hit }
+        guard let img = CIImage(contentsOf: MediaLibrary.resolve(path)) else { return nil }
+        logos[path] = img
+        return img
+    }
 
     init(project: EditProject, renderSize: CGSize, clipInfo: [UUID: ClipRenderInfo]) {
         _project = project
@@ -121,7 +131,13 @@ enum CompositionBuilder {
             let k = i % 2
             let at = cursor
             try insert(vTrack, range: src, into: videoTracks[k], at: at, scaledTo: outDur)
-            if let aTrack = try await asset.loadTracks(withMediaType: .audio).first {
+            // Cleaned-up voice (same timing as the source) replaces the camera sound when present.
+            var soundTrack = try await asset.loadTracks(withMediaType: .audio).first
+            if let clean = clip.cleanAudioURL, FileManager.default.fileExists(atPath: clean.path),
+               let t = try? await AVURLAsset(url: clean).loadTracks(withMediaType: .audio).first {
+                soundTrack = t
+            }
+            if let aTrack = soundTrack {
                 // Audio can be a few frames shorter than video; only insert what exists.
                 let aRange = try await aTrack.load(.timeRange)
                 let r = src.intersection(aRange)
@@ -252,7 +268,8 @@ enum CompositionBuilder {
     static func structuralKey(_ p: EditProject) -> [AnyHashable] {
         var key: [AnyHashable] = [p.canvas.rawValue, p.quality.rawValue]
         for c in p.clips {
-            key += [c.id, c.path, c.trimStart, c.effectiveTrimEnd, c.speed, c.volume, c.transitionOut.rawValue, c.transitionDuration]
+            key += [c.id, c.path, c.trimStart, c.effectiveTrimEnd, c.speed, c.volume, c.transitionOut.rawValue, c.transitionDuration,
+                    c.cleanAudioPath ?? ""]
         }
         for a in p.audio { key.append(a) }
         return key

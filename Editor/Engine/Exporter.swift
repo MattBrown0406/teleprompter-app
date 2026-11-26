@@ -9,26 +9,61 @@ enum ExportCodec: String, CaseIterable, Identifiable {
     var note: String { self == .h264 ? "Plays everywhere" : "Half the file size" }
 }
 
-/// Renders a project to an .mp4 at 1080p or 4K, 30 fps.
+struct ExportOutput: Identifiable {
+    let format: CanvasFormat
+    let url: URL
+    var id: String { format.rawValue }
+}
+
+/// Renders a project to an .mp4 at 1080p or 4K, 30 fps, in one or several canvas shapes.
 @MainActor
 final class Exporter: ObservableObject {
     @Published var progress: Double = 0
     @Published var isExporting = false
-    @Published var outputURL: URL?
+    @Published var outputs: [ExportOutput] = []
     @Published var error: String?
+    @Published var stage = ""
     private var session: AVAssetExportSession?
+    private var cancelled = false
 
-    func export(_ project: EditProject, quality: ExportQuality, codec: ExportCodec) async {
-        isExporting = true
-        progress = 0
+    var outputURL: URL? { outputs.first?.url }
+
+    /// Exports one file per format. Text and logo positions are relative, so they adapt to each shape.
+    func export(_ project: EditProject, formats: [CanvasFormat], quality: ExportQuality, codec: ExportCodec) async {
+        outputs = []
         error = nil
-        outputURL = nil
+        cancelled = false
+        isExporting = true
         // A long 4K export can outlast auto-lock, and a locked phone stops the export.
         UIApplication.shared.isIdleTimerDisabled = true
         defer {
             isExporting = false
             UIApplication.shared.isIdleTimerDisabled = false
         }
+        let list = formats.isEmpty ? [project.canvas] : formats
+        for (k, format) in list.enumerated() {
+            guard !cancelled else { break }
+            var p = project
+            p.canvas = format
+            stage = list.count > 1 ? "\(format.rawValue) (\(k + 1) of \(list.count))" : ""
+            let suffix = list.count > 1 ? " " + format.rawValue.replacingOccurrences(of: ":", with: "x") : ""
+            if let url = await exportOne(p, quality: quality, codec: codec, suffix: suffix, part: k, of: list.count) {
+                outputs.append(ExportOutput(format: format, url: url))
+            } else {
+                break
+            }
+        }
+        stage = ""
+    }
+
+    func export(_ project: EditProject, quality: ExportQuality, codec: ExportCodec) async {
+        await export(project, formats: [project.canvas], quality: quality, codec: codec)
+    }
+
+    private func exportOne(_ project: EditProject, quality: ExportQuality, codec: ExportCodec,
+                           suffix: String, part: Int, of count: Int) async -> URL? {
+        progress = Double(part) / Double(count)
+        var result: URL?
         do {
             var p = project
             p.quality = quality
@@ -39,7 +74,7 @@ final class Exporter: ObservableObject {
             guard let s = AVAssetExportSession(asset: built.composition, presetName: preset) else {
                 throw EditorError.exportFailed("This iPhone can't export at \(quality.rawValue).")
             }
-            let url = MediaLibrary.exports.appendingPathComponent(safeName(p.name)).appendingPathExtension("mp4")
+            let url = MediaLibrary.exports.appendingPathComponent(safeName(p.name) + suffix).appendingPathExtension("mp4")
             try? FileManager.default.removeItem(at: url)
             s.outputURL = url
             s.outputFileType = .mp4
@@ -52,7 +87,7 @@ final class Exporter: ObservableObject {
             let poll = Task { [weak self] in
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 150_000_000)
-                    self?.progress = Double(s.progress)
+                    self?.progress = (Double(part) + Double(s.progress)) / Double(count)
                 }
             }
             await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
@@ -61,8 +96,8 @@ final class Exporter: ObservableObject {
             poll.cancel()
             switch s.status {
             case .completed:
-                progress = 1
-                outputURL = url
+                progress = Double(part + 1) / Double(count)
+                result = url
             case .cancelled:
                 throw EditorError.cancelled
             default:
@@ -70,12 +105,14 @@ final class Exporter: ObservableObject {
             }
         } catch EditorError.cancelled {
             error = nil
+            cancelled = true
         } catch {
             self.error = error.localizedDescription
         }
+        return result
     }
 
-    func cancel() { session?.cancelExport() }
+    func cancel() { cancelled = true; session?.cancelExport() }
 
     private func safeName(_ s: String) -> String {
         let cleaned = s.components(separatedBy: CharacterSet.alphanumerics.union(.init(charactersIn: " -_")).inverted).joined()

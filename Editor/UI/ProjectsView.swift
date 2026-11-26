@@ -11,6 +11,8 @@ struct ProjectsView: View {
     @State private var importing = false
     @State private var renaming: EditProject?
     @State private var newName = ""
+    @State private var showBrand = false
+    @State private var showAI = false
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 14)]
 
@@ -38,6 +40,16 @@ struct ProjectsView: View {
             }
             .background(Theme.background)
             .navigationTitle("Edit")
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button { showBrand = true } label: { Image(systemName: "seal") }
+                        .accessibilityLabel("Brand kit")
+                    Button { showAI = true } label: { Image(systemName: "sparkles") }
+                        .accessibilityLabel("AI settings")
+                }
+            }
+            .sheet(isPresented: $showBrand) { BrandKitView() }
+            .sheet(isPresented: $showAI) { AISettingsView() }
             .overlay { if importing { ProgressView("Importing…").padding(24).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14)) } }
             .photosPicker(isPresented: $showPicker, selection: $pickerItems, maxSelectionCount: 30,
                           selectionBehavior: .ordered, matching: .videos, preferredItemEncoding: .current)

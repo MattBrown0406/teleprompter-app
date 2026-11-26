@@ -4,7 +4,7 @@ import AVFoundation
 /// Which panel is open under the timeline.
 enum EditorTool: String, Identifiable {
     case canvas, background, text, textStyle, captions, music, voiceover, filters, adjust, trim, speed, volume,
-         framing, transition, audioEdit, addClip
+         framing, transition, audioEdit, addClip, autoCut, cleanup, brand, ai
     var id: String { rawValue }
 }
 
@@ -59,7 +59,7 @@ struct EditorView: View {
             }
         }
         .sheet(isPresented: $showExport) {
-            ExportView(project: session.project).presentationDetents([.medium, .large])
+            ExportView(session: session).presentationDetents([.medium, .large])
         }
         .overlay(alignment: .top) {
             if let msg = session.message {
