@@ -46,11 +46,17 @@ targets:
         CADisableMinimumFrameDurationOnPhone: true
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        # Cloud backup of projects (Supabase). Blank = off; the app works fully on the phone.
+        # The publishable key is meant to ship in apps; row level security keeps each user's rows private.
+        SupabaseURL: $(SUPABASE_URL)
+        SupabaseKey: $(SUPABASE_PUBLISHABLE_KEY)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mattbrown0406.cueframe
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        SUPABASE_URL: ""
+        SUPABASE_PUBLISHABLE_KEY: ""
 
   CueframeWatch:
     type: application

@@ -25,6 +25,10 @@ struct EditProject: Codable, Identifiable, Equatable, Hashable {
     var logo: LogoOverlay?
     /// Last generated post caption with hashtags.
     var postCopy: String?
+    /// Set when the video was exported (or marked finished by hand). Nil means still in progress.
+    var finishedAt: Date?
+
+    var isFinished: Bool { finishedAt != nil }
 
     static func new(clips urls: [URL], canvas: CanvasFormat, quality: ExportQuality) -> EditProject {
         let df = DateFormatter()

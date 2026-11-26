@@ -76,8 +76,8 @@ struct EditorView: View {
             }
         }
         .overlay { if session.isLoading { ProgressView() } }
-        .onAppear { PlaybackAudio.activate() }
-        .onDisappear { session.pause(); session.flush() }
+        .onAppear { PlaybackAudio.activate(); OrientationLock.portrait() }
+        .onDisappear { session.pause(); session.flush(); OrientationLock.release() }
     }
 
     private var topBar: some View {

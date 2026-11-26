@@ -2,7 +2,9 @@ import SwiftUI
 
 @main
 struct CueframeApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var router = AppRouter.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -10,6 +12,10 @@ struct CueframeApp: App {
                 .environmentObject(router)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Back up projects whenever the app comes to the front.
+            if phase == .active { ProjectSync.shared.syncSoon(delay: 0) }
         }
     }
 }

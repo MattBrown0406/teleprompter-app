@@ -135,6 +135,7 @@ struct ExportView: View {
                 analysing = false
             }
             await exporter.export(session.project, formats: ordered, quality: quality, codec: codec)
+            if !exporter.outputs.isEmpty && exporter.error == nil { session.markFinished() }
         }
     }
 

@@ -90,7 +90,9 @@ final class EditorSession: ObservableObject {
     func undo() {
         guard let prev = undoStack.popLast() else { return }
         redoStack.append(project)
-        project = prev
+        var restored = prev
+        restored.finishedAt = project.finishedAt   // undo changes the edit, not whether it was exported
+        project = restored
         lastCoalesceKey = nil
         afterChange()
     }
@@ -98,7 +100,9 @@ final class EditorSession: ObservableObject {
     func redo() {
         guard let next = redoStack.popLast() else { return }
         undoStack.append(project)
-        project = next
+        var restored = next
+        restored.finishedAt = project.finishedAt
+        project = restored
         lastCoalesceKey = nil
         afterChange()
     }
@@ -125,6 +129,15 @@ final class EditorSession: ObservableObject {
             guard !Task.isCancelled, let self else { return }
             ProjectStore.shared.save(self.project)
         }
+    }
+
+    /// Called after a successful export: the project moves to Finished.
+    func markFinished() {
+        guard !project.isFinished else { return }
+        var p = project
+        p.finishedAt = Date()
+        project = p
+        flush()
     }
 
     /// Saves right away (closing the editor).
