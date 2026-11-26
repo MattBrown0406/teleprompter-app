@@ -14,6 +14,7 @@ struct TakeReviewView: View {
     @State private var player: AVPlayer
     @State private var saveState: SaveState = .idle
     @State private var confirmDiscard = false
+    @State private var fileInfo = ""
 
     enum SaveState: Equatable { case idle, saving, saved, failed(String) }
 
@@ -75,6 +76,7 @@ struct TakeReviewView: View {
         .padding(.vertical)
         .background(Theme.background.ignoresSafeArea())
         .onAppear { player.play() }
+        .task { await loadFileInfo() }
         .onDisappear { player.pause() }
         .confirmationDialog("Delete this take and record again?", isPresented: $confirmDiscard, titleVisibility: .visible) {
             Button("Delete and retake", role: .destructive) {
@@ -95,18 +97,22 @@ struct TakeReviewView: View {
 
     private var saveIcon: String { saveState == .saved ? "checkmark.circle.fill" : "photo.on.rectangle" }
 
-    private var fileInfo: String {
+    /// Size, length and file size, read from the file once the view opens.
+    private func loadFileInfo() async {
         let asset = AVURLAsset(url: url)
         var parts: [String] = []
-        if let track = asset.tracks(withMediaType: .video).first {
-            let size = track.naturalSize.applying(track.preferredTransform)
-            parts.append("\(Int(abs(size.width)))×\(Int(abs(size.height)))")
+        if let track = try? await asset.loadTracks(withMediaType: .video).first,
+           let (size, transform) = try? await track.load(.naturalSize, .preferredTransform) {
+            let shown = size.applying(transform)
+            parts.append("\(Int(abs(shown.width)))×\(Int(abs(shown.height)))")
         }
-        parts.append(RecorderFormat.time(asset.duration.seconds))
+        if let duration = try? await asset.load(.duration) {
+            parts.append(RecorderFormat.time(duration.seconds))
+        }
         if let bytes = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize {
             parts.append(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file))
         }
-        return parts.joined(separator: " · ")
+        fileInfo = parts.joined(separator: " · ")
     }
 
     private func saveToPhotos() async {
