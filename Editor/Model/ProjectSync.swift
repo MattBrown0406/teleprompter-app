@@ -103,6 +103,7 @@ final class ProjectSync: ObservableObject {
             do {
                 try await pass()
                 status = .synced(Date())
+                FootageSync.shared.syncSoon()
             } catch {
                 status = .waiting((error as? URLError) != nil ? "Offline. Will back up when you're connected."
                                                               : error.localizedDescription)

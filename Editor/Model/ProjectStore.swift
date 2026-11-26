@@ -99,7 +99,7 @@ final class ProjectStore: ObservableObject {
         return out
     }
 
-    private static func brandFiles() -> Set<String> {
+    static func brandFiles() -> Set<String> {
         guard let kit = BrandStore.shared.kit else { return [] }
         return Set([kit.logoPath, kit.introPath, kit.outroPath, kit.customFontPath].compactMap { $0 })
     }

@@ -47,8 +47,15 @@ actor SupabaseClient {
         let refresh_token: String
         let expires_in: Double
         let user: User
-        struct User: Decodable { let id: String }
+        struct User: Decodable {
+            let id: String
+            let email: String?
+            let is_anonymous: Bool?
+        }
     }
+
+    /// The email of the signed-in account, or nil for the automatic (anonymous) one.
+    private(set) var email: String? = KeychainStore.read("supabase.email")
 
     /// A valid access token and the signed-in user id, signing in if needed.
     func session() async throws -> (token: String, userID: String) {
@@ -77,10 +84,63 @@ actor SupabaseClient {
         // Save the refresh token first: Supabase rotates it, and losing it means a new account.
         KeychainStore.write(s.refresh_token, Self.refreshAccount)
         KeychainStore.write(s.user.id, Self.userAccount)
+        let mail = (s.user.is_anonymous == true) ? nil : s.user.email
+        KeychainStore.write(mail, "supabase.email")
+        email = mail
         accessToken = s.access_token
         expiresAt = Date().addingTimeInterval(s.expires_in)
         userID = s.user.id
         return (s.access_token, s.user.id)
+    }
+
+    // MARK: Email sign-in (so projects and footage follow you to a new phone)
+
+    /// Emails a one-time code. Creates the account the first time.
+    func sendCode(to email: String) async throws {
+        guard let cfg = SupabaseConfig.current else { throw CloudError.notConfigured }
+        var req = URLRequest(url: URL(string: "auth/v1/otp", relativeTo: cfg.url)!)
+        req.httpMethod = "POST"
+        req.setValue(cfg.key, forHTTPHeaderField: "apikey")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["email": email, "create_user": true])
+        _ = try await Self.send(req)
+    }
+
+    /// Signs in with the emailed code. From then on this phone uses that account.
+    func verify(email: String, code: String) async throws {
+        guard let cfg = SupabaseConfig.current else { throw CloudError.notConfigured }
+        _ = try await signIn(cfg, path: "verify", body: ["type": "email", "email": email, "token": code])
+    }
+
+    /// Back to an automatic account for this phone. Nothing on the phone is deleted.
+    func signOut() {
+        KeychainStore.write(nil, Self.refreshAccount)
+        KeychainStore.write(nil, Self.userAccount)
+        KeychainStore.write(nil, "supabase.email")
+        accessToken = nil
+        userID = nil
+        email = nil
+    }
+
+    // MARK: Storage
+
+    /// A request to the Storage API with the user's token, e.g. `storage("object/footage/…")`.
+    func storageRequest(_ path: String, method: String) async throws -> URLRequest {
+        guard let cfg = SupabaseConfig.current else { throw CloudError.notConfigured }
+        let (token, _) = try await session()
+        var req = URLRequest(url: URL(string: "storage/v1/\(path)", relativeTo: cfg.url)!.absoluteURL)
+        req.httpMethod = method
+        req.setValue(cfg.key, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return req
+    }
+
+    /// Adds fresh auth headers to a request built elsewhere (resumable upload chunks).
+    func authorize(_ req: inout URLRequest) async throws {
+        guard let cfg = SupabaseConfig.current else { throw CloudError.notConfigured }
+        let (token, _) = try await session()
+        req.setValue(cfg.key, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
     /// Calls a PostgREST endpoint, e.g. `rest("projects?select=id", method: "GET")`.
@@ -105,10 +165,10 @@ actor SupabaseClient {
         }
     }
 
-    private static func send(_ req: URLRequest) async throws -> Data {
+    static func send(_ req: URLRequest, using session: URLSession = .shared) async throws -> Data {
         var req = req
-        req.timeoutInterval = 30
-        let (data, response) = try await URLSession.shared.data(for: req)
+        req.timeoutInterval = 90
+        let (data, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse else { throw CloudError.badResponse }
         guard (200..<300).contains(http.statusCode) else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])

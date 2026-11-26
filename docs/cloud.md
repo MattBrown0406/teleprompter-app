@@ -7,8 +7,8 @@ updates, a deleted project file, or (later) a move to a new phone.
 
 - One row per project in `public.projects`: name, status (`in_progress` / `finished`), canvas,
   quality, length, clip count, dates, and `data`, the full edit as JSON.
-- **Not** the video, music or voiceover files. Those stay on the phone. A 4K minute is around
-  200 to 400 MB, so uploading media is a separate decision (cost and upload time).
+- **Footage** (takes, imported clips, music, voiceovers, logos, brand intro/outro) goes to the private
+  Storage bucket `footage`, at `<user id>/<path inside Documents>`. See "Footage" below.
 
 ## How it works
 
@@ -22,11 +22,29 @@ updates, a deleted project file, or (later) a move to a new phone.
 - A project becomes **Finished** after a successful export. Long-press a project to mark it
   finished or move it back. The Edit tab can filter All / In progress / Finished.
 
+## Footage
+
+- `FootageSync` runs after each project sync. It uploads every file a project (or the brand kit)
+  uses, plus takes in Recordings, then downloads files a project needs but the phone lacks.
+- Wi-Fi only by default (Low Data Mode also pauses it). Cloud backup settings (cloud icon on the
+  Edit tab) can allow cellular or turn footage backup off.
+- Uploads use Supabase's resumable (TUS) endpoint in 6 MB chunks, so an interrupted 4K take resumes.
+- Files modified in the last 30 seconds are skipped (a take still recording).
+- A cloud file is deleted only when no project uses it and it is gone from the phone too.
+- Recording bitrates: 1080p 16 Mbps (about 120 MB a minute), 4K 50 Mbps H.264 or 35 Mbps HEVC
+  (about 260 to 375 MB a minute).
+- Supabase Pro includes 100 GB of storage, then about $0.021 per GB a month; 250 GB of downloads a
+  month are included, then $0.09 per GB.
+- The project's global upload size limit (Storage settings) must be larger than the biggest take.
+
 ## Sign-in
 
 No sign-in screen. Each install signs in anonymously with Supabase Auth and keeps the session in the
 Keychain, which survives app updates. Row level security limits every user to their own rows.
-Later, an Apple or email sign-in can be linked to the same account so projects follow you to a new phone.
+To move to a new phone, sign in with email in Cloud backup settings: Supabase emails a one-time code.
+Signing in on the new phone with the same email restores projects and footage. The Supabase email
+templates "Magic Link" and "Confirm signup" must include `{{ .Token }}` so the email shows the code.
+Signing in switches this phone to that account and uploads what is on the phone to it.
 
 The Supabase project must have **Authentication → Sign In / Providers → Allow anonymous sign-ins** turned on.
 

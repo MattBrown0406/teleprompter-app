@@ -15,6 +15,7 @@ struct ProjectsView: View {
     @State private var newName = ""
     @State private var showBrand = false
     @State private var showAI = false
+    @State private var showCloud = false
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 14)]
 
@@ -27,7 +28,8 @@ struct ProjectsView: View {
                         HStack {
                             Text("Projects").font(.headline).foregroundStyle(Theme.textDim)
                             Spacer()
-                            CloudStatusLabel(status: sync.status)
+                            Button { showCloud = true } label: { CloudStatusLabel(status: sync.status) }
+                                .buttonStyle(.plain)
                         }
                         Picker("Show", selection: $filter) {
                             ForEach(ProjectFilter.allCases) { f in Text("\(f.label) \(count(f))").tag(f) }
@@ -66,10 +68,15 @@ struct ProjectsView: View {
                         .accessibilityLabel("Brand kit")
                     Button { showAI = true } label: { Image(systemName: "sparkles") }
                         .accessibilityLabel("AI settings")
+                    if SupabaseConfig.current != nil {
+                        Button { showCloud = true } label: { Image(systemName: "icloud") }
+                            .accessibilityLabel("Cloud backup")
+                    }
                 }
             }
             .sheet(isPresented: $showBrand) { BrandKitView() }
             .sheet(isPresented: $showAI) { AISettingsView() }
+            .sheet(isPresented: $showCloud) { CloudSettingsView() }
             .overlay { if importing { ProgressView("Importing…").padding(24).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14)) } }
             .photosPicker(isPresented: $showPicker, selection: $pickerItems, maxSelectionCount: 30,
                           selectionBehavior: .ordered, matching: .videos, preferredItemEncoding: .current)
