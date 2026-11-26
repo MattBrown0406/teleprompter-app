@@ -186,7 +186,7 @@ struct PostPlanView: View {
                 Button("Mark as not posted", role: .destructive) { markPosted(p, false) }
             } else {
                 Button {
-                    Task { await post(p) }
+                    Task { await handOff(p) }
                 } label: {
                     HStack {
                         if busy == p { ProgressView() } else { Image(systemName: "paperplane.fill") }
@@ -252,7 +252,7 @@ struct PostPlanView: View {
     }
 
     @MainActor
-    private func post(_ p: SocialPlatform) async {
+    private func handOff(_ p: SocialPlatform) async {
         guard let i = draft.posts.firstIndex(where: { $0.platform == p }) else { return }
         guard let video = draft.video(for: p), let vi = draft.videos.firstIndex(of: video) else {
             error = "Attach a video first: export a project and tap Add to post calendar."
