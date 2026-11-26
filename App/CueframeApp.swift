@@ -6,6 +6,11 @@ struct CueframeApp: App {
     @StateObject private var router = AppRouter.shared
     @Environment(\.scenePhase) private var scenePhase
 
+    init() {
+        // Taps on posting reminders open the post.
+        PostReminders.shared.activate()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -32,6 +37,13 @@ struct RootView: View {
             ProjectsView()
                 .tabItem { Label("Edit", systemImage: "film.stack") }
                 .tag(AppRouter.Tab.edit)
+            PostCalendarView()
+                .tabItem { Label("Post", systemImage: "calendar") }
+                .tag(AppRouter.Tab.post)
+        }
+        .onChange(of: router.openPostPlan) { _, id in
+            // A reminder tapped while the editor is open: close it so the post shows.
+            if id != nil { router.openProject = nil }
         }
         .fullScreenCover(item: $router.openProject) { project in
             EditorView(project: project)

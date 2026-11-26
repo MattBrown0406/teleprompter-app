@@ -3,10 +3,12 @@ import SwiftUI
 @MainActor
 final class AppRouter: ObservableObject {
     static let shared = AppRouter()
-    enum Tab: Hashable { case record, edit }
+    enum Tab: Hashable { case record, edit, post }
 
     @Published var tab: Tab = .record
     @Published var openProject: EditProject?
+    /// A post on the calendar to open, e.g. from a posting reminder.
+    @Published var openPostPlan: UUID?
 }
 
 /// The one entry point the recorder uses to hand finished takes to the editor.

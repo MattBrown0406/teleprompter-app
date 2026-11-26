@@ -13,6 +13,7 @@ struct ExportView: View {
     @State private var analyseProgress = 0.0
     @State private var saved: Set<String> = []
     @State private var saveError: String?
+    @State private var planning = false
 
     init(session: EditorSession) {
         _session = ObservedObject(wrappedValue: session)
@@ -102,6 +103,7 @@ struct ExportView: View {
                                 }
                             }
                         }
+                        Button { planning = true } label: { Label("Add to post calendar", systemImage: "calendar.badge.plus") }
                         if let copy = project.postCopy {
                             Button { UIPasteboard.general.string = copy } label: { Label("Copy post caption and hashtags", systemImage: "doc.on.doc") }
                         }
@@ -122,6 +124,7 @@ struct ExportView: View {
             .onChange(of: formats) { _, _ in reset() }
             .onChange(of: reframe) { _, _ in reset() }
             .interactiveDismissDisabled(exporter.isExporting || analysing)
+            .sheet(isPresented: $planning) { AddToCalendarSheet(project: session.project, outputs: exporter.outputs) }
         }
     }
 
