@@ -224,6 +224,12 @@ enum CompositionBuilder {
                 params.append(p)
             }
         }
+        // Rounding can leave a sound a tick longer than the picture. The video instructions
+        // must cover the whole composition or playback and export fail, so trim the tail.
+        if comp.duration > cursor {
+            comp.removeTimeRange(CMTimeRange(start: cursor, end: comp.duration))
+        }
+
         let mix = AVMutableAudioMix()
         mix.inputParameters = params
 

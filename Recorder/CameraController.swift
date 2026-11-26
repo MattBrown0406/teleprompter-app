@@ -59,19 +59,21 @@ final class CameraController: NSObject, ObservableObject {
         NotificationCenter.default.addObserver(
             self, selector: #selector(sessionRuntimeError(_:)),
             name: AVCaptureSession.runtimeErrorNotification, object: session)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(sessionWasInterrupted(_:)),
+            name: AVCaptureSession.wasInterruptedNotification, object: session)
     }
 
     // MARK: Setup
 
     /// Asks for camera and microphone access, then configures and starts the camera.
     func start(front: Bool, quality: ExportQuality) {
-        Task {
+        // On the main actor, so `configure` reads `state` on the thread that owns it.
+        Task { @MainActor in
             let camera = await AVCaptureDevice.requestAccess(for: .video)
             let mic = await AVCaptureDevice.requestAccess(for: .audio)
-            await MainActor.run {
-                self.permission = camera ? .granted : .denied
-                self.microphoneAllowed = mic
-            }
+            self.permission = camera ? .granted : .denied
+            self.microphoneAllowed = mic
             guard camera else { return }
             self.configure(front: front, quality: quality)
             self.startSession()
@@ -186,8 +188,12 @@ final class CameraController: NSObject, ObservableObject {
             if let format = Self.format(on: device, width: size.0, height: size.1) {
                 device.activeFormat = format
             }
-            device.activeVideoMinFrameDuration = Video.frameDuration
-            device.activeVideoMaxFrameDuration = Video.frameDuration
+            // Setting a frame rate the format can't do throws an exception (a crash), so check first.
+            let fps = Double(Video.frameRate)
+            if device.activeFormat.videoSupportedFrameRateRanges.contains(where: { $0.minFrameRate <= fps && fps <= $0.maxFrameRate }) {
+                device.activeVideoMinFrameDuration = Video.frameDuration
+                device.activeVideoMaxFrameDuration = Video.frameDuration
+            }
             if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
             if device.isSmoothAutoFocusSupported { device.isSmoothAutoFocusEnabled = true }
             if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
@@ -251,6 +257,11 @@ final class CameraController: NSObject, ObservableObject {
 
     func startRecording(codec: RecordCodec) {
         guard state == .idle, permission == .granted else { return }
+        // A writer that runs out of space fails and the whole take is lost, so don't start when nearly full.
+        if let free = Self.freeBytes, free < 500_000_000 {
+            errorMessage = "Your iPhone is almost out of storage. Free up some space before recording."
+            return
+        }
         let url = MediaLibrary.newFile(in: MediaLibrary.recordings, ext: "mp4")
         let audioSettings = microphoneAllowed
             ? audioOutput.recommendedAudioSettingsForAssetWriter(writingTo: .mp4) as? [String: Any]
@@ -329,6 +340,11 @@ final class CameraController: NSObject, ObservableObject {
         }
     }
 
+    private static var freeBytes: Int64? {
+        let values = try? MediaLibrary.documents.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        return values?.volumeAvailableCapacityForImportantUsage
+    }
+
     private func publishError(_ error: Error) {
         DispatchQueue.main.async { self.errorMessage = error.localizedDescription }
     }
@@ -339,6 +355,16 @@ final class CameraController: NSObject, ObservableObject {
             if state == .recording || state == .paused { stopRecording() }
             if error?.code == .mediaServicesWereReset { startSession() }
             else if let error { errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// A phone call, Siri or another app taking the camera stops the frames. Without this the
+    /// writer stays open and the take freezes on one frame for as long as the interruption lasts.
+    @objc private func sessionWasInterrupted(_ note: Notification) {
+        DispatchQueue.main.async { [self] in
+            guard state == .recording || state == .paused else { return }
+            stopRecording()
+            errorMessage = "Recording stopped because the camera was interrupted. Your take was saved."
         }
     }
 

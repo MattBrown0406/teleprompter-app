@@ -83,7 +83,9 @@ struct ScriptLibraryView: View {
                 let data = try Data(contentsOf: url)
                 text = try NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil).string
             } else {
-                text = try String(contentsOf: url, encoding: .utf8)
+                // Detects UTF-16 and other encodings that Word and Notes exports use, not just UTF-8.
+                var encoding = String.Encoding.utf8
+                text = try String(contentsOf: url, usedEncoding: &encoding)
             }
             let script = Script(title: url.deletingPathExtension().lastPathComponent, body: text)
             store.save(script)

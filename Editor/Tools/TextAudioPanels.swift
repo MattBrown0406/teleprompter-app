@@ -209,11 +209,19 @@ struct VoiceoverPanel: View {
         }
         .padding()
         .onDisappear { if recorder.isRecording { stop() } }
+        // The video stopping (end of timeline, or play/pause tapped) ends the voiceover too,
+        // otherwise it keeps recording past the end of the video.
+        .onChange(of: session.isPlaying) { _, playing in
+            if !playing && recorder.isRecording { stop() }
+        }
     }
 
     private func start() {
         Task {
             do {
+                // Playing from the end jumps back to the start, so start there now; otherwise the
+                // voiceover is placed at the old playhead while you talk over the beginning.
+                if session.currentTime >= session.project.duration - 0.05 { session.seek(0) }
                 try await recorder.start(at: session.currentTime)
                 session.player.isMuted = true
                 if !session.isPlaying { session.togglePlay() }

@@ -76,6 +76,7 @@ struct EditorView: View {
             }
         }
         .overlay { if session.isLoading { ProgressView() } }
+        .onAppear { PlaybackAudio.activate() }
         .onDisappear { session.pause(); session.flush() }
     }
 

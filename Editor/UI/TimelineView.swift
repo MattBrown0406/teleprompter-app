@@ -233,8 +233,10 @@ struct ClipStrip: View {
     let selected: Bool
 
     var body: some View {
-        let frameW = height * 0.75
-        let count = max(1, Int(ceil(width / frameW)))
+        // One thumbnail per frame-width, but capped: a long clip zoomed in would otherwise
+        // ask for thousands of frame grabs at once and stall or run out of memory.
+        let count = max(1, min(40, Int(ceil(width / (height * 0.75)))))
+        let frameW = width / CGFloat(count)
         HStack(spacing: 0) {
             ForEach(0..<count, id: \.self) { k in
                 let local = (Double(k) + 0.5) / Double(count) * clip.trimmedDuration

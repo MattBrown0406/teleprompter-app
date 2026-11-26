@@ -209,13 +209,26 @@ final class EditorSession: ObservableObject {
     // MARK: Loading
 
     private func loadDurations() async {
-        var p = project
-        for i in p.clips.indices where p.clips[i].sourceDuration == 0 {
-            let asset = AVURLAsset(url: p.clips[i].url)
-            if let d = try? await asset.load(.duration).seconds, d.isFinite { p.clips[i].sourceDuration = d }
+        var found: [UUID: Double] = [:]
+        for clip in project.clips where clip.sourceDuration == 0 {
+            let asset = AVURLAsset(url: clip.url)
+            if let d = try? await asset.load(.duration).seconds, d.isFinite, d > 0 { found[clip.id] = d }
         }
-        project = p
-        ProjectStore.shared.save(p)
+        if !found.isEmpty {
+            // Merge into the current project rather than a copy taken before loading,
+            // so an edit made while the files were being read isn't thrown away.
+            var p = project
+            for i in p.clips.indices where p.clips[i].sourceDuration == 0 {
+                if let d = found[p.clips[i].id] { p.clips[i].sourceDuration = d }
+            }
+            project = p
+            ProjectStore.shared.save(p)
+        }
+        let missing = project.clips.filter { !FileManager.default.fileExists(atPath: $0.url.path) }.count
+        if missing > 0 {
+            message = missing == 1 ? "A clip's video file is missing. Delete that clip to keep editing."
+                                   : "\(missing) clips are missing their video files. Delete them to keep editing."
+        }
         isLoading = false
         scheduleRebuild()
     }

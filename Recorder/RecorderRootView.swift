@@ -54,6 +54,7 @@ struct RecorderRootView: View {
                         Spacer(minLength: 0)
 
                         if let message = camera.errorMessage { errorBanner(message) }
+                        if camera.permission == .granted && !camera.microphoneAllowed && !isBusy { microphoneHint }
                         if !orientationMatches && !isBusy { orientationHint }
                         prompterControls
                         bottomBar
@@ -109,10 +110,20 @@ struct RecorderRootView: View {
                 cancelCountdown()
                 if isRecording { stopRecording() }
             case .active:
-                camera.startSession()
+                // The camera stays off while a take is being reviewed.
+                if review == nil { camera.startSession() }
             default:
                 break
             }
+        }
+        // Stop the camera (and its hold on the audio session) while a take plays back,
+        // so the review plays through the speaker, and start it again afterwards.
+        .onChange(of: review?.id) { _, id in
+            if id != nil { camera.stopSession() } else { camera.startSession() }
+        }
+        // The camera can stop a take by itself (interruption, error); stop the script with it.
+        .onChange(of: camera.state) { _, state in
+            if state == .finishing { cancelCountdown(); engine.pause() }
         }
         .sheet(isPresented: $showScripts) { ScriptLibraryView(store: scripts) }
         .sheet(isPresented: $showSettings) { RecorderSettingsView(settings: settings, supports4K: camera.supports4K) }
@@ -320,6 +331,19 @@ struct RecorderRootView: View {
         .padding(.horizontal, 12)
     }
 
+    private var microphoneHint: some View {
+        Button {
+            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+        } label: {
+            Label("Microphone is off, so takes will be silent. Tap to turn it on in Settings.", systemImage: "mic.slash.fill")
+                .font(.footnote.weight(.semibold))
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+    }
+
     private var permissionView: some View {
         VStack(spacing: 16) {
             Image(systemName: "video.slash.fill").font(.system(size: 44)).foregroundStyle(Theme.accent)
@@ -373,7 +397,8 @@ struct RecorderRootView: View {
             camera.errorMessage = nil
             runCountdown(seconds: settings.countdown) {
                 camera.startRecording(codec: settings.codec)
-                if settings.scrollStartsWithRecording { engine.play() }
+                // It can refuse to start (for example, storage nearly full).
+                if camera.state == .recording && settings.scrollStartsWithRecording { engine.play() }
             }
         case .recording, .paused:
             stopRecording()

@@ -1,5 +1,6 @@
 import AVFoundation
 import Photos
+import UIKit
 
 enum ExportCodec: String, CaseIterable, Identifiable {
     case h264 = "H.264"
@@ -22,7 +23,12 @@ final class Exporter: ObservableObject {
         progress = 0
         error = nil
         outputURL = nil
-        defer { isExporting = false }
+        // A long 4K export can outlast auto-lock, and a locked phone stops the export.
+        UIApplication.shared.isIdleTimerDisabled = true
+        defer {
+            isExporting = false
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
         do {
             var p = project
             p.quality = quality

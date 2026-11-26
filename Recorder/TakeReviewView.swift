@@ -75,7 +75,10 @@ struct TakeReviewView: View {
         }
         .padding(.vertical)
         .background(Theme.background.ignoresSafeArea())
-        .onAppear { player.play() }
+        .onAppear {
+            PlaybackAudio.activate()
+            player.play()
+        }
         .task { await loadFileInfo() }
         .onDisappear { player.pause() }
         .confirmationDialog("Delete this take and record again?", isPresented: $confirmDiscard, titleVisibility: .visible) {

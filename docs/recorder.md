@@ -21,6 +21,9 @@ How it records
 - Front camera: preview is mirrored like a selfie, the saved video is not (like the iPhone Camera app).
 - If the camera has no 4K at 30 fps, it falls back to 1080p and says so in settings.
 - Leaving the app while recording stops and keeps the take.
+- A phone call, Siri or another app taking the camera also stops and keeps the take (no frozen gap).
+- Recording won't start with less than about 500 MB free, since a full disk loses the whole take.
+- The camera is switched off while a take is reviewed, and playback uses the speaker even on silent.
 
 Hand-off: "Edit" calls `EditorLauncher.open(urls:canvas:quality:)` after the review closes.
 
