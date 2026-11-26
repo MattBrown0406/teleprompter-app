@@ -53,6 +53,7 @@ final class CameraController: NSObject, ObservableObject {
     private var writer: MovieWriter?
     private var pausedOnDataQueue = false
     private var lastElapsedPublish: TimeInterval = -1
+    private var audioTap: ((CMSampleBuffer) -> Void)?
 
     override init() {
         super.init()
@@ -251,6 +252,12 @@ final class CameraController: NSObject, ObservableObject {
         }
     }
 
+    /// Receives every microphone buffer, recording or not (used to follow the script by voice).
+    /// Called on the camera's data queue.
+    func setAudioTap(_ tap: ((CMSampleBuffer) -> Void)?) {
+        dataQueue.async { [self] in audioTap = tap }
+    }
+
     // MARK: Recording
 
     var isPortraitHold: Bool { Int(captureAngle.rounded()) % 180 == 90 }
@@ -402,6 +409,7 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate, AVCapt
             pending = nil
             makeWriter(request, firstFrame: sampleBuffer)
         }
+        if !isVideo { audioTap?(sampleBuffer) }
         guard let writer else { return }
 
         writer.append(sampleBuffer, track: isVideo ? .video : .audio)

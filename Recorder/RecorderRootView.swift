@@ -16,6 +16,7 @@ struct RecorderRootView: View {
     @State private var review: Take?
     @State private var editAfterReview: [URL]?
     @State private var sessionTakes: [URL] = []
+    @State private var cameraOnLeading = true
     @FocusState private var keyboardFocus: Bool
     @Environment(\.scenePhase) private var scenePhase
 
@@ -26,6 +27,8 @@ struct RecorderRootView: View {
 
     private var isRecording: Bool { camera.state == .recording || camera.state == .paused }
     private var isBusy: Bool { camera.state != .idle || countdownValue != nil }
+    /// Voice following needs the microphone; without it the script scrolls at a fixed speed.
+    private var voiceActive: Bool { settings.followVoice && camera.microphoneAllowed }
     private var orientationMatches: Bool { camera.isPortraitHold == settings.canvas.isPortrait }
 
     var body: some View {
@@ -37,33 +40,23 @@ struct RecorderRootView: View {
                     permissionView
                 } else {
                     cameraFrame
-                    VStack(spacing: 8) {
-                        topBar
-                        TeleprompterView(
-                            engine: engine,
-                            text: scripts.selected?.body ?? "",
-                            fontSize: settings.fontSize,
-                            mirrored: settings.mirrorText,
-                            centered: settings.centerText,
-                            backgroundOpacity: settings.prompterOpacity,
-                            onFontSizeChange: { settings.setFontSize($0) }
-                        )
-                        .frame(height: geo.size.height * settings.prompterHeight)
-                        .padding(.horizontal, 10)
-
-                        Spacer(minLength: 0)
-
-                        if let message = camera.errorMessage { errorBanner(message) }
-                        if camera.permission == .granted && !camera.microphoneAllowed && !isBusy { microphoneHint }
-                        if !orientationMatches && !isBusy { orientationHint }
-                        prompterControls
-                        bottomBar
+                    if eyeContactLandscape(geo.size) {
+                        // Sideways: the lens is at the middle of one short edge, so the script is a
+                        // narrow column right beside it and the controls move to the other side.
+                        HStack(spacing: 8) {
+                            if cameraOnLeading { prompter(width: geo.size.width * 0.34, height: geo.size.height, readingLine: 0.38) }
+                            controlsColumn(showPrompter: false, geo: geo)
+                            if !cameraOnLeading { prompter(width: geo.size.width * 0.34, height: geo.size.height, readingLine: 0.38) }
+                        }
+                        .padding(.vertical, 6)
+                    } else {
+                        controlsColumn(showPrompter: true, geo: geo)
                     }
-                    .padding(.bottom, 8)
                 }
 
                 if let value = countdownValue { CountdownOverlay(value: value) }
             }
+            .onChange(of: geo.size) { _, _ in updateCameraSide() }
         }
         .toolbar(isBusy ? .hidden : .visible, for: .tabBar)
         .statusBarHidden(isBusy)
@@ -82,6 +75,9 @@ struct RecorderRootView: View {
         .onKeyPress(.return) { recordTapped(); return .handled }
         .onAppear {
             engine.speed = settings.scrollSpeed
+            engine.followsVoice = voiceActive
+            camera.setAudioTap { [engine] buffer in engine.appendAudio(buffer) }
+            updateCameraSide()
             keyboardFocus = true
             if camera.permission == .unknown {
                 camera.start(front: settings.useFrontCamera, quality: settings.quality)
@@ -92,9 +88,12 @@ struct RecorderRootView: View {
         .onDisappear {
             cancelCountdown()
             if isRecording { stopRecording() }
+            engine.pause()
+            camera.setAudioTap(nil)
             camera.stopSession()
         }
         .onChange(of: settings.scrollSpeed) { _, speed in engine.speed = speed }
+        .onChange(of: voiceActive) { _, active in engine.followsVoice = active }
         .onChange(of: settings.useFrontCamera) { _, front in camera.configure(front: front, quality: settings.quality) }
         .onChange(of: settings.quality) { _, quality in camera.configure(front: settings.useFrontCamera, quality: quality) }
         .onChange(of: scripts.selectedID) { _, _ in engine.rewind() }
@@ -150,6 +149,64 @@ struct RecorderRootView: View {
     }
 
     // MARK: Pieces
+
+    private func eyeContactLandscape(_ size: CGSize) -> Bool {
+        settings.eyeContactLayout && size.width > size.height
+    }
+
+    /// Top bar, script (unless it is drawn beside the lens) and the recording controls.
+    private func controlsColumn(showPrompter: Bool, geo: GeometryProxy) -> some View {
+        VStack(spacing: 8) {
+            if showPrompter && settings.eyeContactLayout {
+                // Upright: a short, narrow band right under the lens, read line at its top,
+                // so your eyes barely move away from the camera.
+                prompter(width: geo.size.width * 0.74,
+                         height: min(max(settings.fontSize * 1.28 * 3.4 + 12, 96), geo.size.height * 0.3),
+                         readingLine: 0)
+                topBar
+            } else {
+                topBar
+                if showPrompter {
+                    prompter(width: nil, height: geo.size.height * settings.prompterHeight, readingLine: nil)
+                        .padding(.horizontal, 10)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            if let message = camera.errorMessage { errorBanner(message) }
+            if camera.permission == .granted && !camera.microphoneAllowed && !isBusy { microphoneHint }
+            if !orientationMatches && !isBusy { orientationHint }
+            VoiceStatusBanner(follower: engine.follower, enabled: settings.followVoice && camera.microphoneAllowed) {
+                settings.followVoice = false
+            }
+            prompterControls
+            bottomBar
+        }
+        .padding(.bottom, 8)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func prompter(width: CGFloat?, height: CGFloat, readingLine: CGFloat?) -> some View {
+        TeleprompterView(
+            engine: engine,
+            text: scripts.selected?.body ?? "",
+            fontSize: settings.fontSize,
+            mirrored: settings.mirrorText,
+            centered: settings.centerText,
+            backgroundOpacity: settings.prompterOpacity,
+            readingLineFraction: readingLine,
+            onFontSizeChange: { settings.setFontSize($0) }
+        )
+        .frame(width: width, height: height)
+    }
+
+    /// Which side the lens is on when the phone is sideways.
+    private func updateCameraSide() {
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        // Home indicator on the right means the top of the phone, with the camera, is on the left.
+        cameraOnLeading = scene?.interfaceOrientation != .landscapeLeft
+    }
 
     /// The camera picture in the exact shape of the take, so what you see is what records.
     private var cameraFrame: some View {
@@ -247,9 +304,22 @@ struct RecorderRootView: View {
             Button { engine.rewind() } label: { controlIcon("backward.end.fill") }
                 .accessibilityLabel("Back to the start of the script")
             ScrollPlayButton(engine: engine)
+            Button { settings.followVoice.toggle() } label: {
+                controlIcon(settings.followVoice ? "waveform" : "speedometer")
+                    .foregroundStyle(settings.followVoice ? Theme.accent : .white)
+            }
+            .accessibilityLabel(settings.followVoice ? "Following your voice. Switch to fixed speed" : "Fixed speed. Switch to follow your voice")
 
-            stepper(label: "Speed", value: "\(Int(settings.scrollSpeed / 10))",
-                    minus: { settings.adjustSpeed(by: -10) }, plus: { settings.adjustSpeed(by: 10) })
+            if voiceActive {
+                Text("Follows your voice")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10).frame(height: 36)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .frame(maxWidth: .infinity)
+            } else {
+                stepper(label: "Speed", value: "\(Int(settings.scrollSpeed / 10))",
+                        minus: { settings.adjustSpeed(by: -10) }, plus: { settings.adjustSpeed(by: 10) })
+            }
             stepper(label: "Text", value: "\(Int(settings.fontSize))",
                     minus: { settings.setFontSize(settings.fontSize - 2) }, plus: { settings.setFontSize(settings.fontSize + 2) })
         }
@@ -457,6 +527,29 @@ struct RecorderRootView: View {
         editAfterReview = nil
         engine.rewind()
         EditorLauncher.open(urls: urls, canvas: settings.canvas, quality: camera.activeQuality)
+    }
+}
+
+/// Says when voice following can't work, with a way to switch to fixed speed.
+private struct VoiceStatusBanner: View {
+    @ObservedObject var follower: SpeechFollower
+    let enabled: Bool
+    let useFixedSpeed: () -> Void
+
+    var body: some View {
+        if enabled, case .unavailable(let reason) = follower.status {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "waveform.slash").foregroundStyle(.yellow)
+                Text(reason).font(.footnote)
+                Spacer(minLength: 0)
+                Button("Fixed speed", action: useFixedSpeed)
+                    .font(.footnote.weight(.bold))
+            }
+            .foregroundStyle(.white)
+            .padding(12)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 12)
+        }
     }
 }
 

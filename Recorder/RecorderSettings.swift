@@ -42,6 +42,10 @@ final class RecorderSettings: ObservableObject {
     @Published var showGrid: Bool { didSet { defaults.set(showGrid, forKey: Keys.grid) } }
     @Published var scrollStartsWithRecording: Bool { didSet { defaults.set(scrollStartsWithRecording, forKey: Keys.autoScroll) } }
     @Published var centerText: Bool { didSet { defaults.set(centerText, forKey: Keys.center) } }
+    /// Scroll follows your voice instead of a fixed speed.
+    @Published var followVoice: Bool { didSet { defaults.set(followVoice, forKey: Keys.followVoice) } }
+    /// Script in a narrow band right next to the lens, so your eyes stay on the viewer.
+    @Published var eyeContactLayout: Bool { didSet { defaults.set(eyeContactLayout, forKey: Keys.eyeContact) } }
 
     static let speedRange: ClosedRange<Double> = 10...400
     static let fontRange: ClosedRange<Double> = 18...96
@@ -64,6 +68,8 @@ final class RecorderSettings: ObservableObject {
         showGrid = d.bool(forKey: Keys.grid)
         scrollStartsWithRecording = d.object(forKey: Keys.autoScroll) as? Bool ?? true
         centerText = d.object(forKey: Keys.center) as? Bool ?? true
+        followVoice = d.object(forKey: Keys.followVoice) as? Bool ?? true
+        eyeContactLayout = d.object(forKey: Keys.eyeContact) as? Bool ?? true
     }
 
     func adjustSpeed(by delta: Double) {
@@ -79,5 +85,6 @@ final class RecorderSettings: ObservableObject {
         static let countdown = "rec.countdown", speed = "rec.speed", font = "rec.font", mirror = "rec.mirror"
         static let opacity = "rec.opacity", height = "rec.height", grid = "rec.grid"
         static let autoScroll = "rec.autoScroll", center = "rec.center"
+        static let followVoice = "rec.followVoice", eyeContact = "rec.eyeContact"
     }
 }
