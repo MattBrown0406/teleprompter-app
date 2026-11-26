@@ -8,6 +8,7 @@ struct ScriptLibraryView: View {
     @State private var editing: Script?
     @State private var importing = false
     @State private var importError: String?
+    @State private var writing = false
 
     var body: some View {
         NavigationStack {
@@ -46,6 +47,7 @@ struct ScriptLibraryView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button { editing = Script(title: "", body: "") } label: { Label("New script", systemImage: "square.and.pencil") }
+                        Button { writing = true } label: { Label("Write with AI", systemImage: "sparkles") }
                         Button {
                             let pasted = UIPasteboard.general.string ?? ""
                             editing = Script(title: "", body: pasted)
@@ -60,6 +62,12 @@ struct ScriptLibraryView: View {
                 ScriptEditorView(script: script) { saved in
                     store.save(saved)
                     store.selectedID = saved.id
+                }
+            }
+            .sheet(isPresented: $writing) {
+                ScriptWriterView { script in
+                    store.save(script)
+                    store.selectedID = script.id
                 }
             }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text, .rtf]) { result in
@@ -101,6 +109,7 @@ struct ScriptEditorView: View {
     var onSave: (Script) -> Void
     @Environment(\.dismiss) private var dismiss
     @FocusState private var bodyFocused: Bool
+    @State private var rewriting = false
 
     var body: some View {
         NavigationStack {
@@ -116,6 +125,9 @@ struct ScriptEditorView: View {
                     .padding(.horizontal, 12)
                 HStack {
                     Text("\(script.wordCount) words")
+                    Spacer()
+                    Button { rewriting = true } label: { Label("Tighten with AI", systemImage: "sparkles") }
+                        .font(.footnote.weight(.semibold))
                     Spacer()
                     Text("About \(RecorderFormat.time(script.estimatedDuration)) to read")
                 }
@@ -133,6 +145,12 @@ struct ScriptEditorView: View {
                 }
             }
             .onAppear { if script.body.isEmpty { bodyFocused = true } }
+            .sheet(isPresented: $rewriting) {
+                ScriptWriterView(initialNotes: script.body) { draft in
+                    script.body = draft.body
+                    if script.title.trimmingCharacters(in: .whitespaces).isEmpty { script.title = draft.title }
+                }
+            }
         }
     }
 }
