@@ -139,7 +139,7 @@ extension Array where Element == FaceSample {
             if self[mid].t <= t { lo = mid } else { hi = mid }
         }
         let a = self[lo], b = self[hi]
-        let k = (t - a.t) / max(b.t - a.t, 0.0001)
+        let k = (t - a.t) / Swift.max(b.t - a.t, 0.0001)
         return FaceSample(t: t, x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, h: a.h + (b.h - a.h) * k)
     }
 }
