@@ -121,7 +121,7 @@ struct VideoTemplate: Codable, Identifiable, Equatable {
 
     /// Puts the template on a project. Clip lengths must be known (sourceDuration filled in).
     func apply(to p: inout EditProject) {
-        p.canvas = canvas
+        // The canvas stays as recorded: a 16:9 take shouldn't be cropped to 9:16 by a template.
         p.background = background
         if let autoReframe { p.autoReframe = autoReframe }
 
