@@ -1,0 +1,43 @@
+name: Cueframe
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    TARGETED_DEVICE_FAMILY: "1"
+    DEVELOPMENT_TEAM: ""
+targets:
+  Cueframe:
+    type: application
+    platform: iOS
+    sources:
+      - App
+      - Shared
+      - Recorder
+      - Editor
+      - path: Resources
+        optional: true
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Cueframe
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSCameraUsageDescription: Cueframe uses the camera to record your videos.
+        NSMicrophoneUsageDescription: Cueframe uses the microphone to record your voice and voiceovers.
+        NSPhotoLibraryUsageDescription: Cueframe imports clips from your library to edit them.
+        NSPhotoLibraryAddUsageDescription: Cueframe saves your finished videos to Photos.
+        NSSpeechRecognitionUsageDescription: Cueframe turns your speech into captions on your device.
+        CADisableMinimumFrameDurationOnPhone: true
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.cueframe
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
