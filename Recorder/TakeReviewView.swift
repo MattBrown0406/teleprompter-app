@@ -102,8 +102,8 @@ struct TakeReviewView: View {
         let asset = AVURLAsset(url: url)
         var parts: [String] = []
         if let track = try? await asset.loadTracks(withMediaType: .video).first,
-           let (size, transform) = try? await track.load(.naturalSize, .preferredTransform) {
-            let shown = size.applying(transform)
+           let loaded = try? await track.load(.naturalSize, .preferredTransform) {
+            let shown = loaded.0.applying(loaded.1)
             parts.append("\(Int(abs(shown.width)))×\(Int(abs(shown.height)))")
         }
         if let duration = try? await asset.load(.duration) {
