@@ -21,6 +21,7 @@ targets:
       - Shared
       - Recorder
       - Editor
+      - Publish
       - path: Resources
         optional: true
     dependencies:
@@ -46,6 +47,8 @@ targets:
         CADisableMinimumFrameDurationOnPhone: true
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        # Lets Post open TikTok, Instagram and Facebook with the video ready.
+        LSApplicationQueriesSchemes: [instagram, tiktok, snssdk1233, fb]
         # Cloud backup of projects (Supabase). Blank = off; the app works fully on the phone.
         # The publishable key is meant to ship in apps; row level security keeps each user's rows private.
         SupabaseURL: $(SUPABASE_URL)
