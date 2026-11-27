@@ -1,6 +1,6 @@
 import Foundation
 
-/// Saves projects as JSON in Documents/Projects.
+/// Saves projects as JSON in Documents/Projects, and queues each change for cloud backup (ProjectSync).
 @MainActor
 final class ProjectStore: ObservableObject {
     static let shared = ProjectStore()
@@ -38,11 +38,74 @@ final class ProjectStore: ObservableObject {
             projects.insert(p, at: 0)
         }
         projects.sort { $0.modified > $1.modified }
+        ProjectSync.shared.markChanged(p.id)
+    }
+
+    /// Marks a project finished (exported) or back to in progress.
+    func setFinished(_ project: EditProject, _ finished: Bool) {
+        var p = projects.first { $0.id == project.id } ?? project
+        guard p.isFinished != finished else { return }
+        p.finishedAt = finished ? Date() : nil
+        save(p)
+    }
+
+    /// Writes a project that came down from the cloud, keeping its own modified date and not re-queuing it.
+    func applyFromCloud(_ project: EditProject) {
+        guard let data = try? encoder.encode(project) else { return }
+        try? data.write(to: file(for: project.id), options: .atomic)
+        if let i = projects.firstIndex(where: { $0.id == project.id }) {
+            projects[i] = project
+        } else {
+            projects.append(project)
+        }
+        projects.sort { $0.modified > $1.modified }
+    }
+
+    /// The project was deleted on another device. Removes the project file but leaves media alone.
+    func removeFromCloud(_ id: UUID) {
+        try? FileManager.default.removeItem(at: file(for: id))
+        projects.removeAll { $0.id == id }
     }
 
     func delete(_ project: EditProject) {
         try? FileManager.default.removeItem(at: file(for: project.id))
         projects.removeAll { $0.id == project.id }
+        ProjectSync.shared.markDeleted(project)
+        // Free the space its media took, unless another project (a duplicate) or the brand kit uses it.
+        let stillUsed = projects.reduce(into: Self.brandFiles()) { $0.formUnion(Self.files(of: $1)) }
+        for path in Self.files(of: project).subtracting(stillUsed) {
+            let url = MediaLibrary.resolve(path)
+            // Only files the app made inside its own folders.
+            guard url.standardizedFileURL.path.hasPrefix(MediaLibrary.documents.standardizedFileURL.path) else { continue }
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// True when a saved project uses this file, so it must not be deleted.
+    func uses(_ url: URL) -> Bool {
+        let path = MediaLibrary.relativePath(url)
+        return projects.contains { Self.files(of: $0).contains(path) }
+    }
+
+    /// Every media file a project points at, as stored paths.
+    nonisolated static func files(of p: EditProject) -> Set<String> {
+        var out = Set<String>()
+        for c in p.clips where !c.isBrandClip {
+            out.insert(c.path)
+            if let clean = c.cleanAudioPath { out.insert(clean) }
+        }
+        for a in p.audio { out.insert(a.path) }
+        if let logo = p.logo?.path { out.insert(logo) }
+        for o in p.overlayItems { out.insert(o.path) }
+        for h in p.hooks ?? [] { if let c = h.clip { out.insert(c.path) } }
+        return out
+    }
+
+    static func brandFiles() -> Set<String> {
+        // Templates keep their music, logo, intro and outro even after the project they came from is gone.
+        let templates = TemplateStore.allFiles
+        guard let kit = BrandStore.shared.kit else { return templates }
+        return templates.union([kit.logoPath, kit.introPath, kit.outroPath, kit.customFontPath].compactMap { $0 })
     }
 
     func duplicate(_ project: EditProject) {
@@ -50,6 +113,7 @@ final class ProjectStore: ObservableObject {
         copy.id = UUID()
         copy.name = project.name + " copy"
         copy.created = Date()
+        copy.finishedAt = nil
         save(copy)
     }
 

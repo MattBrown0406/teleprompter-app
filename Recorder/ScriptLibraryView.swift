@@ -4,10 +4,14 @@ import UniformTypeIdentifiers
 /// Pick, write, paste or import a script.
 struct ScriptLibraryView: View {
     @ObservedObject var store: ScriptStore
+    /// Starts recording a series of scripts back to back. Nil hides the option.
+    var onStartSeries: ((_ ids: [UUID], _ backToBack: Bool) -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var editing: Script?
     @State private var importing = false
     @State private var importError: String?
+    @State private var writing = false
+    @State private var settingUpSeries = false
 
     var body: some View {
         NavigationStack {
@@ -46,11 +50,16 @@ struct ScriptLibraryView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button { editing = Script(title: "", body: "") } label: { Label("New script", systemImage: "square.and.pencil") }
+                        Button { writing = true } label: { Label("Write with AI", systemImage: "sparkles") }
                         Button {
                             let pasted = UIPasteboard.general.string ?? ""
                             editing = Script(title: "", body: pasted)
                         } label: { Label("Paste from clipboard", systemImage: "doc.on.clipboard") }
                         Button { importing = true } label: { Label("Import text file", systemImage: "square.and.arrow.down") }
+                        if onStartSeries != nil {
+                            Divider()
+                            Button { settingUpSeries = true } label: { Label("Record a series", systemImage: "list.number") }
+                        }
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -60,6 +69,21 @@ struct ScriptLibraryView: View {
                 ScriptEditorView(script: script) { saved in
                     store.save(saved)
                     store.selectedID = saved.id
+                }
+            }
+            .sheet(isPresented: $settingUpSeries) {
+                SeriesSetupView(store: store) { ids, backToBack in
+                    // Close the library once the setup sheet is gone, then start.
+                    DispatchQueue.main.async {
+                        dismiss()
+                        onStartSeries?(ids, backToBack)
+                    }
+                }
+            }
+            .sheet(isPresented: $writing) {
+                ScriptWriterView { script in
+                    store.save(script)
+                    store.selectedID = script.id
                 }
             }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text, .rtf]) { result in
@@ -83,7 +107,9 @@ struct ScriptLibraryView: View {
                 let data = try Data(contentsOf: url)
                 text = try NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil).string
             } else {
-                text = try String(contentsOf: url, encoding: .utf8)
+                // Detects UTF-16 and other encodings that Word and Notes exports use, not just UTF-8.
+                var encoding = String.Encoding.utf8
+                text = try String(contentsOf: url, usedEncoding: &encoding)
             }
             let script = Script(title: url.deletingPathExtension().lastPathComponent, body: text)
             store.save(script)
@@ -99,6 +125,7 @@ struct ScriptEditorView: View {
     var onSave: (Script) -> Void
     @Environment(\.dismiss) private var dismiss
     @FocusState private var bodyFocused: Bool
+    @State private var rewriting = false
 
     var body: some View {
         NavigationStack {
@@ -114,6 +141,9 @@ struct ScriptEditorView: View {
                     .padding(.horizontal, 12)
                 HStack {
                     Text("\(script.wordCount) words")
+                    Spacer()
+                    Button { rewriting = true } label: { Label("Tighten with AI", systemImage: "sparkles") }
+                        .font(.footnote.weight(.semibold))
                     Spacer()
                     Text("About \(RecorderFormat.time(script.estimatedDuration)) to read")
                 }
@@ -131,6 +161,12 @@ struct ScriptEditorView: View {
                 }
             }
             .onAppear { if script.body.isEmpty { bodyFocused = true } }
+            .sheet(isPresented: $rewriting) {
+                ScriptWriterView(initialNotes: script.body) { draft in
+                    script.body = draft.body
+                    if script.title.trimmingCharacters(in: .whitespaces).isEmpty { script.title = draft.title }
+                }
+            }
         }
     }
 }

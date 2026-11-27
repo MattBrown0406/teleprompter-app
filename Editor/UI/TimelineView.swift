@@ -30,6 +30,7 @@ struct EditorTimeline: View {
                 clipLane(x0: x0).offset(y: 22)
                 textLane(x0: x0).offset(y: 22 + clipHeight + 8)
                 audioLane(x0: x0).offset(y: 22 + clipHeight + 8 + laneHeight + 6)
+                overlayLane(x0: x0).offset(y: 22 + clipHeight + 8 + (laneHeight + 6) * 2)
 
                 // Playhead
                 Rectangle().fill(.white).frame(width: 2, height: geo.size.height - 4)
@@ -166,6 +167,31 @@ struct EditorTimeline: View {
         }
     }
 
+    private func overlayLane(x0: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(session.project.overlayItems) { item in
+                let selected = session.selection == .overlay(item.id)
+                laneBar(id: item.id, start: item.start, end: item.end, x0: x0,
+                        color: Color.purple.opacity(0.85),
+                        icon: item.kind == .photo ? "photo" : "film",
+                        label: item.note ?? "B-roll", selected: selected) { s, e in
+                    session.edit("overlayTime") { p in
+                        guard var list = p.overlays, let j = list.firstIndex(where: { $0.id == item.id }) else { return }
+                        let o = list[j]
+                        // Dragging the left edge of a video trims its start, like a song.
+                        if o.kind == .video, abs((e - s) - o.duration) > 0.001, abs(e - o.end) < 0.001 {
+                            list[j].sourceStart = max(0, o.sourceStart + (s - o.start))
+                        }
+                        list[j].start = s
+                        list[j].duration = min(e - s, list[j].maxDuration)
+                        p.overlays = list
+                    }
+                }
+                .onTapGesture { session.selection = .overlay(item.id) }
+            }
+        }
+    }
+
     /// A draggable bar. Drag the middle to move, drag an edge (when selected) to change length.
     private func laneBar(id: UUID, start: Double, end: Double, x0: CGFloat, color: Color, icon: String,
                          label: String, selected: Bool, onChange: @escaping (Double, Double) -> Void) -> some View {
@@ -233,8 +259,10 @@ struct ClipStrip: View {
     let selected: Bool
 
     var body: some View {
-        let frameW = height * 0.75
-        let count = max(1, Int(ceil(width / frameW)))
+        // One thumbnail per frame-width, but capped: a long clip zoomed in would otherwise
+        // ask for thousands of frame grabs at once and stall or run out of memory.
+        let count = max(1, min(40, Int(ceil(width / (height * 0.75)))))
+        let frameW = width / CGFloat(count)
         HStack(spacing: 0) {
             ForEach(0..<count, id: \.self) { k in
                 let local = (Double(k) + 0.5) / Double(count) * clip.trimmedDuration

@@ -29,19 +29,31 @@ struct RecorderSettingsView: View {
                     Text(videoFooter)
                 }
 
-                Section("Teleprompter") {
+                Section {
+                    Toggle("Follow my voice", isOn: $settings.followVoice)
+                    Toggle("Eye-contact layout", isOn: $settings.eyeContactLayout)
+                    Toggle("Record in parts", isOn: $settings.recordBySection)
+                } header: {
+                    Text("Teleprompter")
+                } footer: {
+                    Text("Follow my voice listens as you read and keeps the script at your pace, waiting when you pause. It runs on the phone when the phone supports it. Eye-contact layout puts the script in a narrow band right next to the camera, so you look at the viewer, not the screen. Record in parts splits the script at blank lines: record each part until you're happy, then join the best take of each.")
+                }
+
+                Section {
                     Toggle("Mirror text", isOn: $settings.mirrorText)
                     Toggle("Center text", isOn: $settings.centerText)
                     Toggle("Start scrolling when recording starts", isOn: $settings.scrollStartsWithRecording)
                     LabeledContent("Text size") {
                         Stepper("\(Int(settings.fontSize)) pt", value: $settings.fontSize, in: RecorderSettings.fontRange, step: 2)
                     }
-                    LabeledContent("Speed") {
+                    LabeledContent("Fixed speed") {
                         Stepper("\(Int(settings.scrollSpeed / 10))", value: $settings.scrollSpeed, in: RecorderSettings.speedRange, step: 10)
                     }
-                    VStack(alignment: .leading) {
-                        Text("Script area height")
-                        Slider(value: $settings.prompterHeight, in: 0.2...0.7)
+                    if !settings.eyeContactLayout {
+                        VStack(alignment: .leading) {
+                            Text("Script area height")
+                            Slider(value: $settings.prompterHeight, in: 0.2...0.7)
+                        }
                     }
                     VStack(alignment: .leading) {
                         Text("Background darkness")

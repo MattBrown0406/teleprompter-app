@@ -12,14 +12,9 @@ struct TextPanel: View {
                         .lineLimit(1...3)
                         .padding(10)
                         .background(Theme.panelRaised, in: RoundedRectangle(cornerRadius: 10))
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack {
-                            ForEach(TextFont.allCases) { f in
-                                let sel = session.textBinding(\.style.font, .bold, key: "font")
-                                Chip(selected: sel.wrappedValue == f, action: { sel.wrappedValue = f }) {
-                                    Text(f.label).font(Font(TextOverlay.uiFont(f, size: 13) as CTFont))
-                                }
-                            }
+                    if let i = session.selectedTextIndex {
+                        FontChips(style: session.project.texts[i].style) { font, custom in
+                            session.editSelectedText { $0.style.font = font; $0.style.customFont = custom }
                         }
                     }
                     Swatches(color: session.textBinding(\.style.color, RGBA(r: 1, g: 1, b: 1), key: "color"))
@@ -61,10 +56,14 @@ struct TextPanel: View {
                         Button("Use this style for all captions") {
                             let style = session.project.texts[i].style
                             let y = session.project.texts[i].center.y
+                            let look = session.project.texts[i].look
+                            let anim = session.project.texts[i].animation
                             session.edit { p in
                                 for j in p.texts.indices where p.texts[j].isCaption {
                                     p.texts[j].style = style
                                     p.texts[j].center.y = y
+                                    p.texts[j].look = look
+                                    p.texts[j].animation = anim
                                 }
                             }
                         }
@@ -80,60 +79,6 @@ struct TextPanel: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-}
-
-struct CaptionsPanel: View {
-    @ObservedObject var session: EditorSession
-    @State private var working = false
-    @State private var options = Captioner.Options()
-
-    var body: some View {
-        let count = session.project.texts.filter(\.isCaption).count
-        VStack(spacing: 12) {
-            Text("Turns what you say into timed captions, on your iPhone. Each caption can be edited like any text.")
-                .font(.caption).foregroundStyle(Theme.textDim).multilineTextAlignment(.center)
-            HStack {
-                Stepper("Words per caption: \(options.maxWords)", value: $options.maxWords, in: 1...10)
-            }
-            .font(.caption)
-            HStack {
-                Toggle("ALL CAPS", isOn: $options.uppercase)
-                Picker("Position", selection: $options.y) {
-                    Text("Top").tag(0.2)
-                    Text("Middle").tag(0.5)
-                    Text("Lower").tag(0.72)
-                    Text("Bottom").tag(0.86)
-                }
-            }
-            .font(.caption)
-            HStack(spacing: 16) {
-                Button {
-                    working = true
-                    Task {
-                        do {
-                            let caps = try await Captioner.makeCaptions(for: session.project, options: options)
-                            session.replaceCaptions(caps)
-                            session.message = caps.isEmpty ? "No speech found." : "Added \(caps.count) captions."
-                        } catch {
-                            session.message = error.localizedDescription
-                        }
-                        working = false
-                    }
-                } label: {
-                    HStack { if working { ProgressView().tint(.black) }; Text(count > 0 ? "Redo captions" : "Make captions") }
-                        .font(.subheadline.bold())
-                        .padding(.horizontal, 18).padding(.vertical, 10)
-                        .background(Theme.accent, in: Capsule())
-                        .foregroundStyle(.black)
-                }
-                .disabled(working || session.project.clips.isEmpty)
-                if count > 0 {
-                    Button("Remove") { session.replaceCaptions([]) }.font(.caption.bold()).foregroundStyle(.red)
-                }
-            }
-        }
-        .padding(.horizontal)
     }
 }
 
@@ -209,11 +154,19 @@ struct VoiceoverPanel: View {
         }
         .padding()
         .onDisappear { if recorder.isRecording { stop() } }
+        // The video stopping (end of timeline, or play/pause tapped) ends the voiceover too,
+        // otherwise it keeps recording past the end of the video.
+        .onChange(of: session.isPlaying) { _, playing in
+            if !playing && recorder.isRecording { stop() }
+        }
     }
 
     private func start() {
         Task {
             do {
+                // Playing from the end jumps back to the start, so start there now; otherwise the
+                // voiceover is placed at the old playhead while you talk over the beginning.
+                if session.currentTime >= session.project.duration - 0.05 { session.seek(0) }
                 try await recorder.start(at: session.currentTime)
                 session.player.isMuted = true
                 if !session.isPlaying { session.togglePlay() }

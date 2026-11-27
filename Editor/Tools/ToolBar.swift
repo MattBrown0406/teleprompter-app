@@ -26,15 +26,26 @@ struct ToolBar: View {
                     tool("Edit", "character.cursor.ibeam") { pick(.textStyle) }
                     tool("Copy", "plus.square.on.square") { session.duplicateSelection() }
                     tool("Delete", "trash", tint: .red) { session.deleteSelection() }
+                case .overlay:
+                    tool("Edit", "slider.horizontal.3") { pick(.overlayEdit) }
+                    tool("Copy", "plus.square.on.square") { session.duplicateSelection() }
+                    tool("Delete", "trash", tint: .red) { session.deleteSelection() }
                 case .audio:
                     tool("Volume", "speaker.wave.2") { pick(.audioEdit) }
                     tool("Split", "scissors") { splitAudio() }
                     tool("Copy", "plus.square.on.square") { session.duplicateSelection() }
                     tool("Delete", "trash", tint: .red) { session.deleteSelection() }
                 case .none:
+                    tool("Auto-cut", "wand.and.stars") { pick(.autoCut) }
+                    tool("Captions", "captions.bubble") { pick(.captions) }
+                    tool("B-roll", "photo.stack") { pick(.broll) }
+                    tool("Hooks", "flag.2.crossed") { pick(.hooks) }
+                    tool("Templates", "square.grid.2x2") { pick(.templates) }
                     tool("Canvas", "aspectratio") { pick(.canvas) }
                     tool("Text", "textformat") { session.addText(); pick(.textStyle) }
-                    tool("Captions", "captions.bubble") { pick(.captions) }
+                    tool("Clean audio", "waveform.badge.magnifyingglass") { pick(.cleanup) }
+                    tool("Brand", "seal") { pick(.brand) }
+                    tool("AI", "sparkles") { pick(.ai) }
                     tool("Music", "music.note") { pick(.music) }
                     tool("Voiceover", "mic") { pick(.voiceover) }
                     tool("Filters", "camera.filters") { pick(.filters) }
@@ -142,6 +153,14 @@ struct ToolPanel: View {
                 case .framing: FramingPanel(session: session)
                 case .transition: TransitionPanel(session: session, index: transitionIndex ?? session.activeClipIndex ?? 0)
                 case .audioEdit: AudioEditPanel(session: session)
+                case .autoCut: AutoCutPanel(session: session)
+                case .cleanup: CleanupPanel(session: session)
+                case .brand: BrandPanel(session: session)
+                case .ai: AIPanel(session: session)
+                case .broll: BRollPanel(session: session)
+                case .overlayEdit: OverlayPanel(session: session)
+                case .hooks: HookPanel(session: session)
+                case .templates: TemplatePanel(session: session)
                 case .addClip: EmptyView()
                 }
             }
@@ -156,7 +175,7 @@ struct ToolPanel: View {
         case .canvas: return "Canvas"
         case .background: return "Background"
         case .text, .textStyle: return "Text"
-        case .captions: return "Auto captions"
+        case .captions: return "Captions and subtitles"
         case .music: return "Music"
         case .voiceover: return "Voiceover"
         case .filters: return session.selectedClipIndex == nil ? "Filters (clip under playhead)" : "Filters"
@@ -167,6 +186,14 @@ struct ToolPanel: View {
         case .framing: return "Frame"
         case .transition: return "Transition"
         case .audioEdit: return "Sound"
+        case .autoCut: return "Auto-cut mistakes"
+        case .cleanup: return "Clean up audio"
+        case .brand: return "Brand kit"
+        case .ai: return "AI help"
+        case .broll: return "B-roll and cutaways"
+        case .overlayEdit: return "B-roll"
+        case .hooks: return "Hook test"
+        case .templates: return "Templates"
         case .addClip: return "Add"
         }
     }

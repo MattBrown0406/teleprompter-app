@@ -9,6 +9,7 @@ enum Selection: Equatable {
     case clip(UUID)
     case text(UUID)
     case audio(UUID)
+    case overlay(UUID)
 }
 
 /// View model for one open project: owns the player, undo history and editing commands.
@@ -73,10 +74,26 @@ final class EditorSession: ObservableObject {
         afterChange()
     }
 
+    /// Updates the project without an undo step (analysis results such as face paths).
+    func applySilently(_ change: (inout EditProject) -> Void) {
+        var next = project
+        change(&next)
+        guard next != project else { return }
+        project = next
+        scheduleSave()
+        if let built, CompositionBuilder.structuralKey(project) == builtKey {
+            applyStyleChange(built)
+        } else {
+            scheduleRebuild()
+        }
+    }
+
     func undo() {
         guard let prev = undoStack.popLast() else { return }
         redoStack.append(project)
-        project = prev
+        var restored = prev
+        restored.finishedAt = project.finishedAt   // undo changes the edit, not whether it was exported
+        project = restored
         lastCoalesceKey = nil
         afterChange()
     }
@@ -84,7 +101,9 @@ final class EditorSession: ObservableObject {
     func redo() {
         guard let next = redoStack.popLast() else { return }
         undoStack.append(project)
-        project = next
+        var restored = next
+        restored.finishedAt = project.finishedAt
+        project = restored
         lastCoalesceKey = nil
         afterChange()
     }
@@ -95,6 +114,7 @@ final class EditorSession: ObservableObject {
         if case .clip(let id) = selection, !project.clips.contains(where: { $0.id == id }) { selection = .none }
         if case .text(let id) = selection, !project.texts.contains(where: { $0.id == id }) { selection = .none }
         if case .audio(let id) = selection, !project.audio.contains(where: { $0.id == id }) { selection = .none }
+        if case .overlay(let id) = selection, !project.overlayItems.contains(where: { $0.id == id }) { selection = .none }
         scheduleSave()
         if let built, CompositionBuilder.structuralKey(project) == builtKey {
             applyStyleChange(built)
@@ -111,6 +131,15 @@ final class EditorSession: ObservableObject {
             guard !Task.isCancelled, let self else { return }
             ProjectStore.shared.save(self.project)
         }
+    }
+
+    /// Called after a successful export: the project moves to Finished.
+    func markFinished() {
+        guard !project.isFinished else { return }
+        var p = project
+        p.finishedAt = Date()
+        project = p
+        flush()
     }
 
     /// Saves right away (closing the editor).
@@ -139,6 +168,14 @@ final class EditorSession: ObservableObject {
         }
         for i in p.audio.indices {
             p.audio[i].duration = max(0.2, min(p.audio[i].duration, max(0.2, d - p.audio[i].start)))
+        }
+        if let overlays = p.overlays {
+            p.overlays = overlays.compactMap { o in
+                var o = o
+                if o.start >= d && d > 0 { return nil }
+                o.duration = max(0.2, min(o.duration, o.maxDuration, max(0.2, d - o.start)))
+                return o
+            }
         }
         return p
     }
@@ -209,15 +246,29 @@ final class EditorSession: ObservableObject {
     // MARK: Loading
 
     private func loadDurations() async {
-        var p = project
-        for i in p.clips.indices where p.clips[i].sourceDuration == 0 {
-            let asset = AVURLAsset(url: p.clips[i].url)
-            if let d = try? await asset.load(.duration).seconds, d.isFinite { p.clips[i].sourceDuration = d }
+        var found: [UUID: Double] = [:]
+        for clip in project.clips where clip.sourceDuration == 0 {
+            let asset = AVURLAsset(url: clip.url)
+            if let d = try? await asset.load(.duration).seconds, d.isFinite, d > 0 { found[clip.id] = d }
         }
-        project = p
-        ProjectStore.shared.save(p)
+        if !found.isEmpty {
+            // Merge into the current project rather than a copy taken before loading,
+            // so an edit made while the files were being read isn't thrown away.
+            var p = project
+            for i in p.clips.indices where p.clips[i].sourceDuration == 0 {
+                if let d = found[p.clips[i].id] { p.clips[i].sourceDuration = d }
+            }
+            project = p
+            ProjectStore.shared.save(p)
+        }
+        let missing = project.clips.filter { !FileManager.default.fileExists(atPath: $0.url.path) }.count
+        if missing > 0 {
+            message = missing == 1 ? "A clip's video file is missing. Delete that clip to keep editing."
+                                   : "\(missing) clips are missing their video files. Delete them to keep editing."
+        }
         isLoading = false
         scheduleRebuild()
+        await runPendingSetup()
     }
 
     func addClips(_ urls: [URL], at index: Int? = nil) async {
@@ -247,6 +298,10 @@ final class EditorSession: ObservableObject {
     }
     var selectedAudioIndex: Int? {
         if case .audio(let id) = selection { return project.audio.firstIndex { $0.id == id } }
+        return nil
+    }
+    var selectedOverlayIndex: Int? {
+        if case .overlay(let id) = selection { return project.overlayItems.firstIndex { $0.id == id } }
         return nil
     }
 
@@ -298,6 +353,7 @@ final class EditorSession: ObservableObject {
         case .clip(let id): edit { $0.clips.removeAll { $0.id == id } }
         case .text(let id): edit { $0.texts.removeAll { $0.id == id } }
         case .audio(let id): edit { $0.audio.removeAll { $0.id == id } }
+        case .overlay(let id): edit { $0.overlays?.removeAll { $0.id == id } }
         case .none: return
         }
         selection = .none
@@ -325,6 +381,14 @@ final class EditorSession: ObservableObject {
             copy.start = project.audio[i].end
             edit { $0.audio.append(copy) }
             selection = .audio(copy.id)
+        case .overlay:
+            guard let i = selectedOverlayIndex else { return }
+            var copy = project.overlayItems[i]
+            copy.id = UUID()
+            copy.start = copy.end
+            guard copy.start < project.duration - 0.3 else { message = "No room after it for a copy."; return }
+            edit { $0.overlays = ($0.overlays ?? []) + [copy] }
+            selection = .overlay(copy.id)
         case .none: break
         }
     }

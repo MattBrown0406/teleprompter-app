@@ -1,19 +1,35 @@
 import SwiftUI
+import UIKit
 
 struct ExportView: View {
-    let project: EditProject
+    @ObservedObject var session: EditorSession
     @Environment(\.dismiss) private var dismiss
     @StateObject private var exporter = Exporter()
     @State private var quality: ExportQuality
-    @State private var codec: ExportCodec = .h264
-    @State private var saved = false
+    @State private var codec: ExportCodec
+    @State private var formats: Set<CanvasFormat>
+    @State private var reframe: Bool
+    @State private var analysing = false
+    @State private var analyseProgress = 0.0
+    @State private var saved: Set<String> = []
     @State private var saveError: String?
+    @State private var planning = false
+    @State private var allHooks = true
 
-    init(project: EditProject) {
-        self.project = project
-        _quality = State(initialValue: project.quality)
-        _codec = State(initialValue: project.quality == .uhd4K ? .hevc : .h264)
+    init(session: EditorSession) {
+        _session = ObservedObject(wrappedValue: session)
+        let p = session.project
+        _quality = State(initialValue: p.quality)
+        _codec = State(initialValue: p.quality == .uhd4K ? .hevc : .h264)
+        _formats = State(initialValue: [p.canvas])
+        _reframe = State(initialValue: p.autoReframe ?? true)
     }
+
+    private var project: EditProject { session.project }
+    private var ordered: [CanvasFormat] { CanvasFormat.allCases.filter { formats.contains($0) } }
+    /// Hook versions that have a take (the original counts as one).
+    private var hookVersionCount: Int { HookPlanner.versions(project).count }
+    private var versionCount: Int { allHooks ? hookVersionCount : 1 }
 
     var body: some View {
         NavigationStack {
@@ -26,7 +42,6 @@ struct ExportView: View {
                     Picker("Format", selection: $codec) {
                         ForEach(ExportCodec.allCases) { c in Text("\(c.rawValue)  \(c.note)").tag(c) }
                     }
-                    LabeledContent("Size", value: sizeLabel)
                     LabeledContent("Frame rate", value: "30 fps")
                     LabeledContent("Length", value: project.duration.timecode)
                     LabeledContent("About", value: estimate)
@@ -35,31 +50,83 @@ struct ExportView: View {
                 }
 
                 Section {
+                    ForEach(CanvasFormat.allCases) { f in
+                        Toggle(isOn: Binding(get: { formats.contains(f) }, set: { on in
+                            if on { formats.insert(f) } else if formats.count > 1 { formats.remove(f) }
+                        })) {
+                            VStack(alignment: .leading) {
+                                Text(f.label)
+                                let s = f.renderSize(quality)
+                                Text("\(Int(s.width)) × \(Int(s.height))").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Toggle("Keep my face centred", isOn: $reframe)
+                    if analysing { ProgressView("Finding your face…", value: analyseProgress) }
+                } header: {
+                    Text("Post everywhere")
+                } footer: {
+                    Text("Pick several shapes to get one video for each platform from the same edit. With face centring on, the crop follows you instead of cutting you off.")
+                }
+
+                if hookVersionCount > 1 {
+                    Section {
+                        Toggle("Export every hook (\(hookVersionCount) versions)", isOn: $allHooks)
+                    } header: {
+                        Text("Hook test")
+                    } footer: {
+                        Text("Each opening line becomes its own video with the same body, so you can post them and see which hook keeps people watching.")
+                    }
+                }
+
+                Section {
                     if exporter.isExporting {
                         VStack(alignment: .leading, spacing: 8) {
                             ProgressView(value: exporter.progress)
                             HStack {
-                                Text("Exporting \(Int(exporter.progress * 100))%").font(.caption.monospacedDigit())
+                                Text("Exporting \(exporter.stage) \(Int(exporter.progress * 100))%").font(.caption.monospacedDigit())
                                 Spacer()
                                 Button("Cancel", role: .destructive) { exporter.cancel() }
                             }
                         }
-                    } else if let url = exporter.outputURL {
-                        Button {
-                            Task {
-                                do { try await Exporter.saveToPhotos(url); saved = true } catch { saveError = error.localizedDescription }
+                    } else if !exporter.outputs.isEmpty {
+                        ForEach(exporter.outputs) { out in
+                            HStack {
+                                Text(out.title).font(.headline).lineLimit(1).frame(minWidth: 50, alignment: .leading)
+                                Button {
+                                    Task {
+                                        do { try await Exporter.saveToPhotos(out.url); saved.insert(out.id) } catch { saveError = error.localizedDescription }
+                                    }
+                                } label: {
+                                    Label(saved.contains(out.id) ? "Saved" : "Save to Photos",
+                                          systemImage: saved.contains(out.id) ? "checkmark.circle.fill" : "square.and.arrow.down")
+                                }
+                                .disabled(saved.contains(out.id))
+                                .buttonStyle(.borderless)
+                                Spacer()
+                                ShareLink(item: out.url) { Image(systemName: "square.and.arrow.up") }
+                                    .buttonStyle(.borderless)
                             }
-                        } label: {
-                            Label(saved ? "Saved to Photos" : "Save to Photos", systemImage: saved ? "checkmark.circle.fill" : "square.and.arrow.down")
                         }
-                        .disabled(saved)
-                        ShareLink(item: url) { Label("Share to TikTok, Instagram, Facebook…", systemImage: "square.and.arrow.up") }
+                        if exporter.outputs.count > 1 {
+                            Button("Save all to Photos") {
+                                Task {
+                                    for out in exporter.outputs where !saved.contains(out.id) {
+                                        do { try await Exporter.saveToPhotos(out.url); saved.insert(out.id) } catch { saveError = error.localizedDescription; break }
+                                    }
+                                }
+                            }
+                        }
+                        Button { planning = true } label: { Label("Add to post calendar", systemImage: "calendar.badge.plus") }
+                        if let copy = project.postCopy {
+                            Button { UIPasteboard.general.string = copy } label: { Label("Copy post caption and hashtags", systemImage: "doc.on.doc") }
+                        }
                     } else {
-                        Button {
-                            Task { await exporter.export(project, quality: quality, codec: codec) }
-                        } label: {
-                            Text("Export video").font(.headline).frame(maxWidth: .infinity)
+                        Button { start() } label: {
+                            let n = ordered.count * versionCount
+                            Text(n > 1 ? "Export \(n) videos" : "Export video").font(.headline).frame(maxWidth: .infinity)
                         }
+                        .disabled(analysing)
                     }
                     if let e = exporter.error ?? saveError { Text(e).foregroundStyle(.red).font(.footnote) }
                 }
@@ -67,15 +134,37 @@ struct ExportView: View {
             .navigationTitle("Export")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { exporter.cancel(); dismiss() } } }
-            .onChange(of: quality) { _, _ in exporter.outputURL = nil; saved = false }
-            .onChange(of: codec) { _, _ in exporter.outputURL = nil; saved = false }
-            .interactiveDismissDisabled(exporter.isExporting)
+            .onChange(of: quality) { _, _ in reset() }
+            .onChange(of: codec) { _, _ in reset() }
+            .onChange(of: formats) { _, _ in reset() }
+            .onChange(of: reframe) { _, _ in reset() }
+            .onChange(of: allHooks) { _, _ in reset() }
+            .interactiveDismissDisabled(exporter.isExporting || analysing)
+            .sheet(isPresented: $planning) { AddToCalendarSheet(project: session.project, outputs: exporter.outputs) }
         }
     }
 
-    private var sizeLabel: String {
-        let s = project.canvas.renderSize(quality)
-        return "\(Int(s.width)) × \(Int(s.height))"
+    private func reset() { exporter.outputs = []; saved = [] }
+
+    private func start() {
+        Task {
+            if reframe != (project.autoReframe == true) || (reframe && session.needsFaceAnalysis) {
+                analysing = true
+                await session.setAutoReframe(reframe) { p in analyseProgress = p }
+                analysing = false
+            }
+            if reframe && versionCount > 1 {
+                analysing = true
+                await session.prepareHookFaces()
+                analysing = false
+            }
+            if versionCount > 1 {
+                await exporter.export(versions: HookPlanner.versions(session.project), formats: ordered, quality: quality, codec: codec)
+            } else {
+                await exporter.export(session.project, formats: ordered, quality: quality, codec: codec)
+            }
+            if !exporter.outputs.isEmpty && exporter.error == nil { session.markFinished() }
+        }
     }
 
     private var estimate: String {
@@ -86,7 +175,7 @@ struct ExportView: View {
         case (.uhd4K, .h264): 50
         case (.uhd4K, .hevc): 30
         }
-        let mb = mbps * project.duration / 8
+        let mb = mbps * project.duration / 8 * Double(max(1, formats.count) * versionCount)
         return mb < 1000 ? "\(Int(mb.rounded())) MB" : String(format: "%.1f GB", mb / 1000)
     }
 }

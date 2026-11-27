@@ -50,9 +50,18 @@ struct Chip<Content: View>: View {
 
 struct Swatches: View {
     @Binding var color: RGBA
+    /// Brand colours first, then the standard palette.
+    @MainActor private var colors: [RGBA] {
+        var out: [RGBA] = []
+        for c in (BrandStore.shared.kit?.colors ?? []) + RGBA.palette
+        where !out.contains(where: { abs($0.r - c.r) < 0.01 && abs($0.g - c.g) < 0.01 && abs($0.b - c.b) < 0.01 }) {
+            out.append(RGBA(r: c.r, g: c.g, b: c.b))
+        }
+        return Array(out.prefix(10))
+    }
     var body: some View {
-        HStack(spacing: 10) {
-            ForEach(RGBA.palette, id: \.self) { c in
+        HStack(spacing: 8) {
+            ForEach(colors, id: \.self) { c in
                 Circle()
                     .fill(Color(red: c.r, green: c.g, blue: c.b))
                     .frame(width: 26, height: 26)

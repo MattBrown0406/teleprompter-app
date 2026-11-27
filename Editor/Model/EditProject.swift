@@ -14,12 +14,39 @@ struct EditProject: Codable, Identifiable, Equatable, Hashable {
     var clips: [ClipItem] = []
     var texts: [TextItem] = []
     var audio: [AudioItem] = []
+    // Added later; optional so older project files still open.
+    /// The teleprompter script this was recorded from (captions use its exact wording).
+    var scriptText: String?
+    /// What was said, from the last caption or auto-cut pass. Used for post copy and hashtags.
+    var transcript: String?
+    /// Keep the speaker's face centred when the canvas crops the video.
+    var autoReframe: Bool?
+    /// Brand logo drawn over the video (not over intro/outro clips).
+    var logo: LogoOverlay?
+    /// Last generated post caption with hashtags.
+    var postCopy: String?
+    /// Set when the video was exported (or marked finished by hand). Nil means still in progress.
+    var finishedAt: Date?
+    /// B-roll: photos and videos laid over the talking head while its sound keeps playing.
+    var overlays: [OverlayItem]?
+    /// Other opening lines for the same video. Each one exports as its own version.
+    var hooks: [HookVariant]?
+    /// The last clip of the original hook (the opening line). Nil until the hook is marked.
+    var hookEndClipID: UUID?
+    /// A template to apply once the clips' lengths are known (set for new videos with a default template).
+    var pendingTemplateID: UUID?
+    /// Caption style to auto-caption with when the editor opens (from a template).
+    var pendingCaptions: CaptionPreset?
+
+    var isFinished: Bool { finishedAt != nil }
 
     static func new(clips urls: [URL], canvas: CanvasFormat, quality: ExportQuality) -> EditProject {
         let df = DateFormatter()
         df.dateFormat = "MMM d, h:mm a"
         var p = EditProject(name: "Video \(df.string(from: Date()))", canvas: canvas, quality: quality)
         p.clips = urls.map { ClipItem(url: $0) }
+        BrandKit.applyIfAutomatic(to: &p)
+        p.pendingTemplateID = TemplateStore.defaultTemplateID
         return p
     }
 
@@ -87,6 +114,13 @@ struct ClipItem: Codable, Identifiable, Equatable, Hashable {
     var mirrored = false
     var transitionOut: TransitionKind = .none
     var transitionDuration: Double = 0.5
+    // Added later; optional so older project files still open.
+    /// Face positions over the source, for auto reframing (source seconds).
+    var faces: [FaceSample]?
+    /// Cleaned-up voice track for the whole source file (same timing as the video).
+    var cleanAudioPath: String?
+    /// Set for brand intro/outro clips.
+    var role: ClipRole?
 
     init(url: URL) { path = MediaLibrary.relativePath(url) }
 
@@ -94,6 +128,56 @@ struct ClipItem: Codable, Identifiable, Equatable, Hashable {
     var effectiveTrimEnd: Double { trimEnd > 0 ? min(trimEnd, sourceDuration) : sourceDuration }
     var trimmedDuration: Double { max(0, effectiveTrimEnd - trimStart) }
     var outputDuration: Double { trimmedDuration / speed }
+    var cleanAudioURL: URL? { cleanAudioPath.map(MediaLibrary.resolve) }
+    var isBrandClip: Bool { role != nil }
+}
+
+enum ClipRole: String, Codable { case intro, outro }
+
+/// Face centre in the upright source frame, normalised 0...1 with the origin at the bottom left.
+struct FaceSample: Codable, Equatable, Hashable {
+    var t: Double
+    var x: Double
+    var y: Double
+    var h: Double
+}
+
+extension Array where Element == FaceSample {
+    /// Linear interpolation between samples (they are smoothed when made).
+    func position(at t: Double) -> FaceSample? {
+        guard let first = first, let last = last else { return nil }
+        if t <= first.t { return first }
+        if t >= last.t { return last }
+        var lo = 0, hi = count - 1
+        while hi - lo > 1 {
+            let mid = (lo + hi) / 2
+            if self[mid].t <= t { lo = mid } else { hi = mid }
+        }
+        let a = self[lo], b = self[hi]
+        let k = (t - a.t) / Swift.max(b.t - a.t, 0.0001)
+        return FaceSample(t: t, x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, h: a.h + (b.h - a.h) * k)
+    }
+}
+
+enum LogoCorner: String, Codable, CaseIterable, Identifiable {
+    case topLeft, topRight, bottomLeft, bottomRight
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .topLeft: return "Top left"
+        case .topRight: return "Top right"
+        case .bottomLeft: return "Bottom left"
+        case .bottomRight: return "Bottom right"
+        }
+    }
+}
+
+struct LogoOverlay: Codable, Equatable, Hashable {
+    var path: String
+    var corner: LogoCorner = .topRight
+    /// Width as a fraction of the canvas width.
+    var size: Double = 0.18
+    var opacity: Double = 0.9
 }
 
 enum ClipFit: String, Codable, CaseIterable { case fill, fit }
@@ -172,6 +256,11 @@ struct TextItem: Codable, Identifiable, Equatable, Hashable {
     var style = TextStyle()
     var isCaption = false
     var animation: TextAnimation = .fade
+    // Added later; optional so older project files still open.
+    /// Word timings for animated captions, in seconds from `start`.
+    var words: [CaptionWord]?
+    /// How a word-timed caption animates.
+    var look: CaptionLook?
 
     var duration: Double { end - start }
 }
@@ -186,6 +275,32 @@ struct TextStyle: Codable, Equatable, Hashable {
     var outline = false
     var shadow = true
     var alignment: TextAlign = .center
+    // Added later; optional so older project files still open.
+    /// Colour of the spoken word in animated captions.
+    var highlightColor: RGBA?
+    /// PostScript name of an imported brand font. Overrides `font` when set.
+    var customFont: String?
+}
+
+struct CaptionWord: Codable, Equatable, Hashable {
+    var text: String
+    var start: Double
+    var end: Double
+}
+
+/// Animated caption styles (word timing comes from speech recognition).
+enum CaptionLook: String, Codable, CaseIterable, Identifiable {
+    case plain, highlight, box, oneWord, reveal
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .plain: return "Plain"
+        case .highlight: return "Highlight"
+        case .box: return "Word box"
+        case .oneWord: return "One word"
+        case .reveal: return "Reveal"
+        }
+    }
 }
 
 enum TextFont: String, Codable, CaseIterable, Identifiable {
