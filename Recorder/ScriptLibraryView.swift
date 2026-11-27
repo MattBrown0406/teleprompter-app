@@ -4,11 +4,14 @@ import UniformTypeIdentifiers
 /// Pick, write, paste or import a script.
 struct ScriptLibraryView: View {
     @ObservedObject var store: ScriptStore
+    /// Starts recording a series of scripts back to back. Nil hides the option.
+    var onStartSeries: ((_ ids: [UUID], _ backToBack: Bool) -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var editing: Script?
     @State private var importing = false
     @State private var importError: String?
     @State private var writing = false
+    @State private var settingUpSeries = false
 
     var body: some View {
         NavigationStack {
@@ -53,6 +56,10 @@ struct ScriptLibraryView: View {
                             editing = Script(title: "", body: pasted)
                         } label: { Label("Paste from clipboard", systemImage: "doc.on.clipboard") }
                         Button { importing = true } label: { Label("Import text file", systemImage: "square.and.arrow.down") }
+                        if onStartSeries != nil {
+                            Divider()
+                            Button { settingUpSeries = true } label: { Label("Record a series", systemImage: "list.number") }
+                        }
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -62,6 +69,15 @@ struct ScriptLibraryView: View {
                 ScriptEditorView(script: script) { saved in
                     store.save(saved)
                     store.selectedID = saved.id
+                }
+            }
+            .sheet(isPresented: $settingUpSeries) {
+                SeriesSetupView(store: store) { ids, backToBack in
+                    // Close the library once the setup sheet is gone, then start.
+                    DispatchQueue.main.async {
+                        dismiss()
+                        onStartSeries?(ids, backToBack)
+                    }
                 }
             }
             .sheet(isPresented: $writing) {

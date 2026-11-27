@@ -22,6 +22,10 @@ final class CameraController: NSObject, ObservableObject {
     @Published var errorMessage: String?
     /// Set when a take is saved. The view clears it after showing the review.
     @Published var finishedTake: URL?
+    /// True while a background effect is on (blur, color or photo behind you).
+    @Published private(set) var effectOn = false
+    /// True when the background effect can't keep up with 30 fps at this quality.
+    @Published private(set) var effectStruggling = false
 
     let session = AVCaptureSession()
 
@@ -54,6 +58,9 @@ final class CameraController: NSObject, ObservableObject {
     private var pausedOnDataQueue = false
     private var lastElapsedPublish: TimeInterval = -1
     private var audioTap: ((CMSampleBuffer) -> Void)?
+    private var processor: BackgroundProcessor?
+    private var effectDisplay: AVSampleBufferDisplayLayer?
+    private var lastStrugglePublish = false
 
     override init() {
         super.init()
@@ -248,6 +255,7 @@ final class CameraController: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 guard let self, self.state == .idle else { return }
                 self.captureAngle = angle
+                if self.effectOn { self.rotateOutput(to: angle) }
             }
         }
     }
@@ -256,6 +264,65 @@ final class CameraController: NSObject, ObservableObject {
     /// Called on the camera's data queue.
     func setAudioTap(_ tap: ((CMSampleBuffer) -> Void)?) {
         dataQueue.async { [self] in audioTap = tap }
+    }
+
+    // MARK: Background effect
+
+    /// Turns the background effect on, off, or changes it. Ignored while recording, so a take keeps one look.
+    func setBackground(_ effect: BackgroundEffect) {
+        guard state == .idle else { return }
+        effectOn = effect.isOn
+        if !effect.isOn { effectStruggling = false }
+        // With the effect on, the preview shows processed frames, so they must already be upright.
+        if effect.isOn { rotateOutput(to: captureAngle) }
+        dataQueue.async { [self] in
+            if effect.isOn {
+                if let processor { processor.update(effect) } else { processor = BackgroundProcessor(effect: effect) }
+            } else {
+                processor = nil
+                lastStrugglePublish = false
+                effectDisplay?.sampleBufferRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
+            }
+        }
+    }
+
+    /// Call after a new background photo is saved.
+    func reloadBackgroundPhoto() {
+        dataQueue.async { [self] in processor?.reloadPhoto() }
+    }
+
+    /// Called by the effect preview once its layer exists.
+    func setEffectPreview(_ layer: AVSampleBufferDisplayLayer?) {
+        dataQueue.async { [self] in effectDisplay = layer }
+    }
+
+    private func rotateOutput(to angle: CGFloat) {
+        sessionQueue.async { [self] in
+            if let connection = videoOutput.connection(with: .video),
+               connection.isVideoRotationAngleSupported(angle) {
+                connection.videoRotationAngle = angle
+            }
+        }
+    }
+
+    // dataQueue
+    private func applyEffect(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer {
+        guard let processor, let processed = processor.process(sampleBuffer) else { return sampleBuffer }
+        if let display = effectDisplay {
+            if let attachments = CMSampleBufferGetSampleAttachmentsArray(processed, createIfNecessary: true) as? [NSMutableDictionary],
+               let first = attachments.first {
+                first[kCMSampleAttachmentKey_DisplayImmediately as NSString] = kCFBooleanTrue
+            }
+            let renderer = display.sampleBufferRenderer
+            if renderer.status == .failed { renderer.flush() }
+            renderer.enqueue(processed)
+        }
+        if processor.isStruggling != lastStrugglePublish {
+            lastStrugglePublish = processor.isStruggling
+            let struggling = processor.isStruggling
+            DispatchQueue.main.async { self.effectStruggling = struggling }
+        }
+        return processed
     }
 
     // MARK: Recording
@@ -403,8 +470,10 @@ final class CameraController: NSObject, ObservableObject {
 }
 
 extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    func captureOutput(_ output: AVCaptureOutput, didOutput rawBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         let isVideo = output === videoOutput
+        // The background effect changes the picture before it is previewed and written.
+        let sampleBuffer = isVideo ? applyEffect(rawBuffer) : rawBuffer
         if isVideo, let request = pending {
             pending = nil
             makeWriter(request, firstFrame: sampleBuffer)

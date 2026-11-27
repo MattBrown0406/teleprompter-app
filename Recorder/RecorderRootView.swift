@@ -8,6 +8,14 @@ struct RecorderRootView: View {
     @StateObject private var scripts = ScriptStore()
     @StateObject private var remote = RemoteHub()
     @StateObject private var sections = SectionSession()
+    @StateObject private var practice = PracticeSession()
+    @StateObject private var series = SeriesSession()
+    @State private var mode: Mode = .record
+    @State private var showBackground = false
+    /// True during the countdown between back-to-back series takes.
+    @State private var upNext = false
+    /// A series take filed to its own project that should open in the editor after the review.
+    @State private var projectAfterReview: EditProject?
     @State private var showSectionTakes = false
     /// @State on purpose: the engine publishes every frame, and only the script view should redraw.
     @State private var engine = PrompterEngine()
@@ -23,15 +31,21 @@ struct RecorderRootView: View {
     @FocusState private var keyboardFocus: Bool
     @Environment(\.scenePhase) private var scenePhase
 
+    enum Mode: String, CaseIterable, Identifiable {
+        case record = "Record", practice = "Practice"
+        var id: String { rawValue }
+    }
+
     struct Take: Identifiable {
         let url: URL
         var id: URL { url }
     }
 
     private var isRecording: Bool { camera.state == .recording || camera.state == .paused }
-    private var isBusy: Bool { camera.state != .idle || countdownValue != nil }
+    private var isBusy: Bool { camera.state != .idle || countdownValue != nil || practice.isRunning }
     private var scriptBody: String { scripts.selected?.body ?? "" }
-    private var bySection: Bool { settings.recordBySection && !scriptBody.isEmpty }
+    /// Record in parts is off during a series: each script there is one take.
+    private var bySection: Bool { settings.recordBySection && !scriptBody.isEmpty && !series.isActive }
     /// The whole script, or just the part being recorded.
     private var prompterText: String { bySection ? sections.currentText : scriptBody }
 
@@ -64,7 +78,16 @@ struct RecorderRootView: View {
                     }
                 }
 
-                if let value = countdownValue { CountdownOverlay(value: value) }
+                if let value = countdownValue {
+                    CountdownOverlay(value: value)
+                    if upNext {
+                        VStack {
+                            Spacer()
+                            SeriesUpNext(title: scripts.selected?.displayTitle ?? "", position: series.position)
+                                .padding(.bottom, geo.size.height * 0.18)
+                        }
+                    }
+                }
             }
             .onChange(of: geo.size) { _, _ in updateCameraSide() }
         }
@@ -91,7 +114,11 @@ struct RecorderRootView: View {
         .onAppear {
             engine.speed = settings.scrollSpeed
             engine.followsVoice = voiceActive
-            camera.setAudioTap { [engine] buffer in engine.appendAudio(buffer) }
+            camera.setAudioTap { [engine, practice] buffer in
+                engine.appendAudio(buffer)
+                practice.appendAudio(buffer)
+            }
+            camera.setBackground(settings.background)
             updateCameraSide()
             remote.onCommand = handleRemote
             remote.observe(engine)
@@ -106,6 +133,7 @@ struct RecorderRootView: View {
         }
         .onDisappear {
             cancelCountdown()
+            practice.cancel()
             if isRecording { stopRecording() }
             engine.pause()
             camera.setAudioTap(nil)
@@ -116,6 +144,11 @@ struct RecorderRootView: View {
         .onChange(of: voiceActive) { _, active in engine.followsVoice = active }
         .onChange(of: settings.useFrontCamera) { _, front in camera.configure(front: front, quality: settings.quality) }
         .onChange(of: settings.quality) { _, quality in camera.configure(front: settings.useFrontCamera, quality: quality) }
+        .onChange(of: settings.background) { _, effect in camera.setBackground(effect) }
+        .onChange(of: camera.state) { _, state in
+            // A change made while a take was recording applies once it is saved.
+            if state == .idle { camera.setBackground(settings.background) }
+        }
         .onChange(of: scripts.selectedID) { _, _ in engine.rewind() }
         .onChange(of: scriptBody, initial: true) { _, text in sections.load(script: text) }
         .onChange(of: sections.current) { _, _ in engine.rewind() }
@@ -123,6 +156,13 @@ struct RecorderRootView: View {
             guard let url else { return }
             camera.finishedTake = nil
             sessionTakes.append(url)
+            if series.isActive && series.backToBack {
+                // No review: file it and roll into the next script.
+                series.file(take: url, script: scripts.selected, canvas: settings.canvas, quality: camera.activeQuality)
+                syncSeriesScript()
+                if series.isActive { startNextInSeries() }
+                return
+            }
             if bySection { sections.add(url) }
             review = Take(url: url)
         }
@@ -130,6 +170,7 @@ struct RecorderRootView: View {
             switch phase {
             case .background:
                 cancelCountdown()
+                if practice.isRunning { stopPractice() }
                 if isRecording { stopRecording() }
             case .active:
                 // The camera stays off while a take is being reviewed.
@@ -149,7 +190,36 @@ struct RecorderRootView: View {
             sendRemoteStatus()
         }
         .onChange(of: voiceActive) { _, _ in sendRemoteStatus() }
-        .sheet(isPresented: $showScripts) { ScriptLibraryView(store: scripts) }
+        .sheet(isPresented: $showScripts) {
+            ScriptLibraryView(store: scripts) { ids, backToBack in startSeries(ids, backToBack: backToBack) }
+        }
+        .sheet(isPresented: $showBackground) {
+            BackgroundPickerView(settings: settings, struggling: camera.effectStruggling) { camera.reloadBackgroundPhoto() }
+        }
+        .sheet(item: $practice.report) { report in
+            PracticeReportView(
+                report: report,
+                previous: practice.previous(for: scripts.selected?.id, before: report),
+                onPracticeAgain: {
+                    engine.rewind()
+                    // Let the sheet finish closing before the countdown starts.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { practiceTapped() }
+                },
+                onRecord: {
+                    engine.rewind()
+                    mode = .record
+                })
+        }
+        .sheet(isPresented: $series.showSummary) {
+            SeriesSummaryView(filed: series.filed, onOpen: openProject) { series.finishSummary() }
+        }
+        // Show what a series made once the last take's review has closed.
+        .onChange(of: series.isActive) { _, active in
+            guard !active, !series.filed.isEmpty else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                if !series.isActive, !series.filed.isEmpty { series.showSummary = true }
+            }
+        }
         .sheet(isPresented: $showSettings) { RecorderSettingsView(settings: settings, supports4K: camera.supports4K) }
         .fullScreenCover(item: $review, onDismiss: openEditorIfRequested) { take in
             TakeReviewView(
@@ -166,11 +236,24 @@ struct RecorderRootView: View {
                     review = nil
                 },
                 onEdit: { urls in
-                    editAfterReview = urls
+                    if series.isActive {
+                        // Filed to this script's own project, which then opens.
+                        projectAfterReview = series.file(take: take.url, script: scripts.selected,
+                                                         canvas: settings.canvas, quality: camera.activeQuality)
+                        syncSeriesScript()
+                    } else {
+                        editAfterReview = urls
+                    }
                     review = nil
                 },
                 onKeep: {
                     engine.rewind()
+                    if series.isActive {
+                        series.file(take: take.url, script: scripts.selected, canvas: settings.canvas, quality: camera.activeQuality)
+                        syncSeriesScript()
+                        review = nil
+                        return
+                    }
                     // On to the next part once this one has a take.
                     if bySection, sections.chosen[sections.current] == take.url { sections.next() }
                     review = nil
@@ -219,11 +302,13 @@ struct RecorderRootView: View {
 
             if let message = camera.errorMessage { errorBanner(message) }
             if camera.permission == .granted && !camera.microphoneAllowed && !isBusy { microphoneHint }
-            if !orientationMatches && !isBusy { orientationHint }
+            if !orientationMatches && !isBusy && mode == .record { orientationHint }
+            if camera.effectOn && camera.effectStruggling && camera.activeQuality == .uhd4K && !isBusy { effectHint }
             VoiceStatusBanner(follower: engine.follower, enabled: settings.followVoice && camera.microphoneAllowed) {
                 settings.followVoice = false
             }
             prompterControls
+            if !isBusy { modePicker }
             bottomBar
         }
         .padding(.bottom, 8)
@@ -231,7 +316,16 @@ struct RecorderRootView: View {
     }
 
     @ViewBuilder private var sectionStrip: some View {
-        if bySection && !isRecording {
+        if series.isActive && !isBusy {
+            SeriesStrip(series: series, title: scripts.selected?.displayTitle ?? "",
+                        onSkip: {
+                            series.skip()
+                            syncSeriesScript()
+                            engine.rewind()
+                        },
+                        onEnd: { series.end() })
+        }
+        if bySection && !isRecording && !practice.isRunning {
             SectionStrip(session: sections) { showSectionTakes = true }
                 .disabled(countdownValue != nil)
         }
@@ -261,6 +355,8 @@ struct RecorderRootView: View {
     /// The camera picture in the exact shape of the take, so what you see is what records.
     private var cameraFrame: some View {
         CameraPreview(camera: camera)
+            // With a background effect on, show the processed picture: exactly what records.
+            .overlay { if camera.effectOn { EffectPreview(camera: camera, mirrored: settings.useFrontCamera) } }
             .aspectRatio(settings.canvas.isPortrait ? 9.0 / 16.0 : 16.0 / 9.0, contentMode: .fit)
             .overlay { if settings.showGrid { ThirdsGrid() } }
             .overlay {
@@ -275,7 +371,10 @@ struct RecorderRootView: View {
 
     private var topBar: some View {
         HStack(spacing: 10) {
-            if isRecording {
+            if practice.isRunning {
+                PracticeBadge(session: practice)
+                Spacer()
+            } else if isRecording {
                 recordingBadge
                 Spacer()
                 Text("\(settings.canvas.rawValue) · \(camera.activeQuality.rawValue) · 30 fps")
@@ -293,6 +392,13 @@ struct RecorderRootView: View {
                 Spacer()
                 aspectPicker
                 qualityToggle
+                Button { showBackground = true } label: {
+                    Image(systemName: "person.crop.rectangle.fill")
+                        .padding(9)
+                        .foregroundStyle(settings.background.isOn ? Theme.accent : .white)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .accessibilityLabel(settings.background.isOn ? "Background effect: \(settings.background.kind.label)" : "Background effect")
                 Button { showSettings = true } label: {
                     Image(systemName: "gearshape.fill")
                         .padding(9)
@@ -403,12 +509,13 @@ struct RecorderRootView: View {
             .frame(maxWidth: .infinity)
 
             RecordButton(state: camera.state, countingDown: countdownValue != nil,
-                         enabled: orientationMatches || isBusy, action: recordTapped)
+                         practice: mode == .practice, practicing: practice.isRunning,
+                         enabled: orientationMatches || isBusy || mode == .practice, action: recordTapped)
                 .frame(maxWidth: .infinity)
 
             // Right: the takes recorded so far.
             Group {
-                if let last = sessionTakes.last, !isBusy {
+                if let last = sessionTakes.last, !isBusy, mode == .record {
                     Button { review = Take(url: last) } label: {
                         VStack(spacing: 2) {
                             Image(systemName: "film.stack").font(.title3)
@@ -425,6 +532,35 @@ struct RecorderRootView: View {
             .frame(maxWidth: .infinity)
         }
         .foregroundStyle(.white)
+    }
+
+    private var modePicker: some View {
+        HStack(spacing: 0) {
+            ForEach(Mode.allCases) { item in
+                Button { mode = item } label: {
+                    Text(item.rawValue)
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 14).padding(.vertical, 6)
+                        .background(mode == item ? (item == .practice ? Theme.accent2 : Theme.accent) : Color.clear, in: Capsule())
+                        .foregroundStyle(mode == item ? Color.black : Color.white)
+                }
+            }
+        }
+        .padding(2)
+        .background(.ultraThinMaterial, in: Capsule())
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Record or practice")
+    }
+
+    private var effectHint: some View {
+        Button { settings.quality = .hd1080 } label: {
+            Label("The background effect is struggling at 4K on this phone. Tap to record at 1080p.", systemImage: "gauge.with.dots.needle.67percent")
+                .font(.footnote.weight(.semibold))
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
     }
 
     private var orientationHint: some View {
@@ -512,7 +648,8 @@ struct RecorderRootView: View {
     /// Commands from the Watch, headphones and volume buttons.
     private func handleRemote(_ command: RemoteCommand) {
         // Remotes shouldn't act behind a sheet or the take review.
-        guard review == nil, !showScripts, !showSettings, !showSectionTakes else { return }
+        guard review == nil, !showScripts, !showSettings, !showSectionTakes, !showBackground,
+              practice.report == nil, !series.showSummary else { return }
         switch command {
         case .toggleScroll: engine.toggle()
         case .record: recordTapped()
@@ -528,6 +665,7 @@ struct RecorderRootView: View {
     }
 
     private func recordTapped() {
+        if mode == .practice || practice.isRunning { practiceTapped(); return }
         switch camera.state {
         case .idle:
             if countdownValue != nil { cancelCountdown(); return }
@@ -588,9 +726,73 @@ struct RecorderRootView: View {
         countdownTask?.cancel()
         countdownTask = nil
         countdownValue = nil
+        upNext = false
+    }
+
+    // MARK: Practice
+
+    /// Starts or stops a practice run: the script scrolls and you are timed and listened to, but nothing records.
+    private func practiceTapped() {
+        if practice.isRunning { stopPractice(); return }
+        if countdownValue != nil { cancelCountdown(); return }
+        guard camera.state == .idle, !prompterText.isEmpty else { return }
+        camera.errorMessage = nil
+        engine.rewind()
+        runCountdown(seconds: settings.countdown) {
+            practice.start(script: prompterText, scriptID: scripts.selected?.id,
+                           shareListener: voiceActive ? engine.follower : nil,
+                           microphone: camera.microphoneAllowed)
+            engine.play()
+        }
+    }
+
+    private func stopPractice() {
+        cancelCountdown()
+        engine.pause()
+        practice.stop()
+    }
+
+    // MARK: Series
+
+    private func startSeries(_ ids: [UUID], backToBack: Bool) {
+        let existing = ids.filter { id in scripts.scripts.contains { $0.id == id } }
+        guard !existing.isEmpty else { return }
+        mode = .record
+        series.start(existing, backToBack: backToBack)
+        syncSeriesScript()
+        engine.rewind()
+    }
+
+    /// Puts the series' current script in the prompter.
+    private func syncSeriesScript() {
+        if let id = series.currentID { scripts.selectedID = id }
+    }
+
+    /// The countdown into the next back-to-back take, with an "up next" card.
+    private func startNextInSeries() {
+        engine.rewind()
+        upNext = true
+        runCountdown(seconds: max(settings.countdown, 3)) {
+            upNext = false
+            guard orientationMatches, camera.permission == .granted else { return }
+            camera.startRecording(codec: settings.codec)
+            if camera.state == .recording && settings.scrollStartsWithRecording { engine.play() }
+        }
+    }
+
+    private func openProject(_ id: UUID) {
+        guard let project = ProjectStore.shared.projects.first(where: { $0.id == id }) else { return }
+        AppRouter.shared.tab = .edit
+        AppRouter.shared.openProject = project
     }
 
     private func openEditorIfRequested() {
+        if let project = projectAfterReview {
+            projectAfterReview = nil
+            engine.rewind()
+            openProject(project.id)
+            return
+        }
         guard let urls = editAfterReview, !urls.isEmpty else { return }
         editAfterReview = nil
         engine.rewind()
@@ -642,10 +844,13 @@ private struct ScrollPlayButton: View {
 private struct RecordButton: View {
     let state: CameraController.State
     let countingDown: Bool
+    var practice = false
+    var practicing = false
     let enabled: Bool
     let action: () -> Void
 
-    private var isRecording: Bool { state == .recording || state == .paused }
+    private var isRecording: Bool { state == .recording || state == .paused || practicing }
+    private var fill: Color { practice ? Theme.accent2 : Theme.accent }
 
     var body: some View {
         Button(action: action) {
@@ -655,7 +860,7 @@ private struct RecordButton: View {
                     ProgressView().tint(.white)
                 } else {
                     RoundedRectangle(cornerRadius: isRecording ? 8 : 32)
-                        .fill(countingDown ? Color.white.opacity(0.7) : Theme.accent)
+                        .fill(countingDown ? Color.white.opacity(0.7) : fill)
                         .frame(width: isRecording ? 32 : 64, height: isRecording ? 32 : 64)
                         .animation(.snappy, value: isRecording)
                 }
@@ -663,6 +868,8 @@ private struct RecordButton: View {
         }
         .disabled(!enabled || state == .finishing)
         .opacity(enabled ? 1 : 0.4)
-        .accessibilityLabel(isRecording ? "Stop recording" : countingDown ? "Cancel countdown" : "Start recording")
+        .accessibilityLabel(countingDown ? "Cancel countdown"
+                            : practice ? (practicing ? "Stop practice" : "Start practice")
+                            : isRecording ? "Stop recording" : "Start recording")
     }
 }
