@@ -159,10 +159,10 @@ struct PreviewCanvas: View {
     /// Visible text under a tap selects it; otherwise selects the clip under the playhead.
     private func tapCanvas(_ p: CGPoint, size: CGSize) {
         let t = session.currentTime
-        let nx = p.x / size.width, ny = p.y / size.height
+        let nx = Double(p.x / size.width), ny = Double(p.y / size.height)
         let hit = session.project.texts.last { item in
             t >= item.start && t < item.end &&
-            abs(item.center.x - nx) < 0.3 * item.scale && abs(item.center.y - ny) < item.style.size * item.scale * 1.2 * size.width / size.height
+            abs(item.center.x - nx) < 0.3 * item.scale && abs(item.center.y - ny) < item.style.size * item.scale * 1.2 * Double(size.width / size.height)
         }
         if let hit {
             session.selection = .text(hit.id)
@@ -179,7 +179,7 @@ struct PreviewCanvas: View {
                 if dragStart == nil { dragStart = session.project.clips[i].offset }
                 let s = dragStart!
                 session.editClip("pan") {
-                    $0.offset = NPoint(x: s.x + v.translation.width / size.width, y: s.y + v.translation.height / size.height)
+                    $0.offset = NPoint(x: s.x + Double(v.translation.width / size.width), y: s.y + Double(v.translation.height / size.height))
                 }
             }
             .onEnded { _ in dragStart = nil }
@@ -187,7 +187,7 @@ struct PreviewCanvas: View {
             .onChanged { v in
                 guard let i = session.selectedClipIndex else { return }
                 if pinchStart == nil { pinchStart = session.project.clips[i].zoom }
-                let z = max(0.3, min(5, pinchStart! * v.magnification))
+                let z = max(0.3, min(5, pinchStart! * Double(v.magnification)))
                 session.editClip("zoom") { $0.zoom = z }
             }
             .onEnded { _ in pinchStart = nil }
@@ -195,29 +195,29 @@ struct PreviewCanvas: View {
     }
 
     private func textHandle(_ item: TextItem, size: CGSize) -> some View {
-        let w = max(60, min(size.width * 0.9, CGFloat(item.text.count) * CGFloat(item.style.size * item.scale) * size.width * 0.6))
-        let h = max(30, CGFloat(item.style.size * item.scale) * size.width * 1.5)
+        let w: CGFloat = max(60, min(size.width * 0.9, CGFloat(item.text.count) * CGFloat(item.style.size * item.scale) * size.width * 0.6))
+        let h: CGFloat = max(30, CGFloat(item.style.size * item.scale) * size.width * 1.5)
         return RoundedRectangle(cornerRadius: 4)
             .stroke(Theme.accent, style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
             .frame(width: w, height: h)
             .contentShape(Rectangle())
             .rotationEffect(.degrees(item.rotation))
-            .position(x: item.center.x * size.width, y: item.center.y * size.height)
+            .position(x: CGFloat(item.center.x) * size.width, y: CGFloat(item.center.y) * size.height)
             .gesture(
                 DragGesture()
                     .onChanged { v in
                         if dragStart == nil { dragStart = item.center }
                         let s = dragStart!
                         session.editSelectedText("move") {
-                            $0.center = NPoint(x: min(1, max(0, s.x + v.translation.width / size.width)),
-                                               y: min(1, max(0, s.y + v.translation.height / size.height)))
+                            $0.center = NPoint(x: min(1, max(0, s.x + Double(v.translation.width / size.width))),
+                                               y: min(1, max(0, s.y + Double(v.translation.height / size.height))))
                         }
                     }
                     .onEnded { _ in dragStart = nil }
                     .simultaneously(with: MagnifyGesture()
                         .onChanged { v in
                             if pinchStart == nil { pinchStart = item.scale }
-                            let sc = max(0.3, min(4, pinchStart! * v.magnification))
+                            let sc = max(0.3, min(4, pinchStart! * Double(v.magnification)))
                             session.editSelectedText("scale") { $0.scale = sc }
                         }
                         .onEnded { _ in pinchStart = nil })

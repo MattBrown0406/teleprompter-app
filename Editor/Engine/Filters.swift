@@ -77,20 +77,20 @@ enum Transitions {
             let c = CIImage(color: kind == .fadeBlack ? .black : .white).cropped(to: rect)
             return p < 0.5 ? dissolve(A, c, p * 2) : dissolve(c, B, (p - 0.5) * 2)
         case .slideLeft:
-            let x = size.width * p
+            let x = size.width * CGFloat(p)
             return A.transformed(by: .init(translationX: -x, y: 0))
                 .composited(over: B.transformed(by: .init(translationX: size.width - x, y: 0)))
                 .composited(over: CIImage(color: .black).cropped(to: rect))
         case .slideUp:
-            let y = size.height * p
+            let y = size.height * CGFloat(p)
             return A.transformed(by: .init(translationX: 0, y: y))
                 .composited(over: B.transformed(by: .init(translationX: 0, y: y - size.height)))
                 .composited(over: CIImage(color: .black).cropped(to: rect))
         case .wipe:
-            let revealed = B.cropped(to: CGRect(x: 0, y: 0, width: size.width * p, height: size.height))
+            let revealed = B.cropped(to: CGRect(x: 0, y: 0, width: size.width * CGFloat(p), height: size.height))
             return revealed.composited(over: A)
         case .zoom:
-            let s = 1 + p * 0.6
+            let s = CGFloat(1 + p * 0.6)
             let zoomed = A.transformed(by: CGAffineTransform(translationX: -size.width / 2, y: -size.height / 2)
                 .concatenating(CGAffineTransform(scaleX: s, y: s))
                 .concatenating(CGAffineTransform(translationX: size.width / 2, y: size.height / 2))).cropped(to: rect)

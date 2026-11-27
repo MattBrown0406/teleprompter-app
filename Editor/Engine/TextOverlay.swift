@@ -50,14 +50,14 @@ enum TextOverlay {
 
         let w = raster.extent.width, h = raster.extent.height
         var tf = CGAffineTransform(translationX: -w / 2, y: -h / 2)
-        tf = tf.concatenating(CGAffineTransform(scaleX: scale, y: scale))
-        tf = tf.concatenating(CGAffineTransform(rotationAngle: -item.rotation * .pi / 180))
-        let cx = item.center.x * canvas.width
-        let cy = (1 - item.center.y + rise) * canvas.height
+        tf = tf.concatenating(CGAffineTransform(scaleX: CGFloat(scale), y: CGFloat(scale)))
+        tf = tf.concatenating(CGAffineTransform(rotationAngle: CGFloat(-item.rotation * Double.pi / 180)))
+        let cx: CGFloat = CGFloat(item.center.x) * canvas.width
+        let cy: CGFloat = CGFloat(1 - item.center.y + rise) * canvas.height
         tf = tf.concatenating(CGAffineTransform(translationX: cx, y: cy))
         var img = raster.transformed(by: tf)
         if opacity < 0.999 {
-            img = img.applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: opacity)])
+            img = img.applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(opacity))])
         }
         return img
     }

@@ -163,8 +163,8 @@ struct RangeTrimmer: View {
         GeometryReader { geo in
             let total = max(clip.sourceDuration, 0.1)
             let w = geo.size.width
-            let sx = CGFloat(clip.trimStart / total) * w
-            let ex = CGFloat(clip.effectiveTrimEnd / total) * w
+            let sx: CGFloat = CGFloat(clip.trimStart / total) * w
+            let ex: CGFloat = CGFloat(clip.effectiveTrimEnd / total) * w
             ZStack(alignment: .leading) {
                 HStack(spacing: 0) {
                     ForEach(0..<10, id: \.self) { k in

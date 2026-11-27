@@ -109,10 +109,10 @@ enum FrameRenderer {
         let w = img.extent.width, h = img.extent.height
         guard w > 0, h > 0 else { return background(project.background, nil, size) }
         let fitScale = clip.fit == .fill ? max(size.width / w, size.height / h) : min(size.width / w, size.height / h)
-        let s = fitScale * clip.zoom
+        let s: CGFloat = fitScale * CGFloat(clip.zoom)
         var placed = img.transformed(by: CGAffineTransform(scaleX: s, y: s))
-        let dx = (size.width - w * s) / 2 + clip.offset.x * size.width
-        let dy = (size.height - h * s) / 2 - clip.offset.y * size.height
+        let dx: CGFloat = (size.width - w * s) / 2 + CGFloat(clip.offset.x) * size.width
+        let dy: CGFloat = (size.height - h * s) / 2 - CGFloat(clip.offset.y) * size.height
         placed = placed.transformed(by: CGAffineTransform(translationX: dx, y: dy))
         placed = Filters.apply(clip.filter, amount: clip.filterAmount, adjust: clip.adjust, to: placed)
 
