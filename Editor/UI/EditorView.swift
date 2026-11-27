@@ -4,7 +4,7 @@ import AVFoundation
 /// Which panel is open under the timeline.
 enum EditorTool: String, Identifiable {
     case canvas, background, text, textStyle, captions, music, voiceover, filters, adjust, trim, speed, volume,
-         framing, transition, audioEdit, addClip, autoCut, cleanup, brand, ai
+         framing, transition, audioEdit, addClip, autoCut, cleanup, brand, ai, broll, overlayEdit, hooks, templates
     var id: String { rawValue }
 }
 
@@ -31,7 +31,7 @@ struct EditorView: View {
                 session.selection = .clip(session.project.clips[i].id)
                 tool = .transition
             })
-            .frame(height: 176)
+            .frame(height: 206)
             Divider().overlay(Color.white.opacity(0.08))
             if let tool {
                 ToolPanel(tool: tool, session: session, transitionIndex: transitionIndex) { self.tool = nil }
@@ -51,10 +51,10 @@ struct EditorView: View {
         .onChange(of: session.selection) { _, sel in
             // Close panels that don't fit the new selection.
             switch (tool, sel) {
-            case (.textStyle?, .text), (.audioEdit?, .audio): break
+            case (.textStyle?, .text), (.audioEdit?, .audio), (.overlayEdit?, .overlay): break
             case (.trim?, .clip), (.speed?, .clip), (.volume?, .clip), (.framing?, .clip), (.filters?, .clip),
                  (.adjust?, .clip), (.transition?, .clip): break
-            case (.some(let t), _) where [.trim, .speed, .volume, .framing, .textStyle, .audioEdit].contains(t): tool = nil
+            case (.some(let t), _) where [.trim, .speed, .volume, .framing, .textStyle, .audioEdit, .overlayEdit].contains(t): tool = nil
             default: break
             }
         }

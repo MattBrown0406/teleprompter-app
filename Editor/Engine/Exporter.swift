@@ -12,7 +12,10 @@ enum ExportCodec: String, CaseIterable, Identifiable {
 struct ExportOutput: Identifiable {
     let format: CanvasFormat
     let url: URL
-    var id: String { format.rawValue }
+    /// Which hook version this is ("Hook B"), empty for a single version.
+    var label = ""
+    var id: String { label + format.rawValue }
+    var title: String { label.isEmpty ? format.rawValue : "\(label) \(format.rawValue)" }
 }
 
 /// Renders a project to an .mp4 at 1080p or 4K, 30 fps, in one or several canvas shapes.
@@ -30,6 +33,13 @@ final class Exporter: ObservableObject {
 
     /// Exports one file per format. Text and logo positions are relative, so they adapt to each shape.
     func export(_ project: EditProject, formats: [CanvasFormat], quality: ExportQuality, codec: ExportCodec) async {
+        await export(versions: [("", project)], formats: formats, quality: quality, codec: codec)
+    }
+
+    /// Exports every version (for example each hook) in every format.
+    func export(versions: [(label: String, project: EditProject)], formats: [CanvasFormat],
+                quality: ExportQuality, codec: ExportCodec) async {
+        guard let firstProject = versions.first?.project else { return }
         outputs = []
         error = nil
         cancelled = false
@@ -40,17 +50,23 @@ final class Exporter: ObservableObject {
             isExporting = false
             UIApplication.shared.isIdleTimerDisabled = false
         }
-        let list = formats.isEmpty ? [project.canvas] : formats
-        for (k, format) in list.enumerated() {
-            guard !cancelled else { break }
-            var p = project
-            p.canvas = format
-            stage = list.count > 1 ? "\(format.rawValue) (\(k + 1) of \(list.count))" : ""
-            let suffix = list.count > 1 ? " " + format.rawValue.replacingOccurrences(of: ":", with: "x") : ""
-            if let url = await exportOne(p, quality: quality, codec: codec, suffix: suffix, part: k, of: list.count) {
-                outputs.append(ExportOutput(format: format, url: url))
-            } else {
-                break
+        let list = formats.isEmpty ? [firstProject.canvas] : formats
+        let total = list.count * versions.count
+        var k = 0
+        outer: for version in versions {
+            for format in list {
+                guard !cancelled else { break outer }
+                var p = version.project
+                p.canvas = format
+                let what = [version.label, list.count > 1 ? format.rawValue : ""].filter { !$0.isEmpty }.joined(separator: " ")
+                stage = total > 1 ? "\(what) (\(k + 1) of \(total))" : ""
+                let suffix = list.count > 1 ? " " + format.rawValue.replacingOccurrences(of: ":", with: "x") : ""
+                if let url = await exportOne(p, quality: quality, codec: codec, suffix: suffix, part: k, of: total) {
+                    outputs.append(ExportOutput(format: format, url: url, label: versions.count > 1 ? version.label : ""))
+                } else {
+                    break outer
+                }
+                k += 1
             }
         }
         stage = ""

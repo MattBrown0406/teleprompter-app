@@ -9,6 +9,7 @@ enum Selection: Equatable {
     case clip(UUID)
     case text(UUID)
     case audio(UUID)
+    case overlay(UUID)
 }
 
 /// View model for one open project: owns the player, undo history and editing commands.
@@ -113,6 +114,7 @@ final class EditorSession: ObservableObject {
         if case .clip(let id) = selection, !project.clips.contains(where: { $0.id == id }) { selection = .none }
         if case .text(let id) = selection, !project.texts.contains(where: { $0.id == id }) { selection = .none }
         if case .audio(let id) = selection, !project.audio.contains(where: { $0.id == id }) { selection = .none }
+        if case .overlay(let id) = selection, !project.overlayItems.contains(where: { $0.id == id }) { selection = .none }
         scheduleSave()
         if let built, CompositionBuilder.structuralKey(project) == builtKey {
             applyStyleChange(built)
@@ -166,6 +168,14 @@ final class EditorSession: ObservableObject {
         }
         for i in p.audio.indices {
             p.audio[i].duration = max(0.2, min(p.audio[i].duration, max(0.2, d - p.audio[i].start)))
+        }
+        if let overlays = p.overlays {
+            p.overlays = overlays.compactMap { o in
+                var o = o
+                if o.start >= d && d > 0 { return nil }
+                o.duration = max(0.2, min(o.duration, o.maxDuration, max(0.2, d - o.start)))
+                return o
+            }
         }
         return p
     }
@@ -258,6 +268,7 @@ final class EditorSession: ObservableObject {
         }
         isLoading = false
         scheduleRebuild()
+        await runPendingSetup()
     }
 
     func addClips(_ urls: [URL], at index: Int? = nil) async {
@@ -287,6 +298,10 @@ final class EditorSession: ObservableObject {
     }
     var selectedAudioIndex: Int? {
         if case .audio(let id) = selection { return project.audio.firstIndex { $0.id == id } }
+        return nil
+    }
+    var selectedOverlayIndex: Int? {
+        if case .overlay(let id) = selection { return project.overlayItems.firstIndex { $0.id == id } }
         return nil
     }
 
@@ -338,6 +353,7 @@ final class EditorSession: ObservableObject {
         case .clip(let id): edit { $0.clips.removeAll { $0.id == id } }
         case .text(let id): edit { $0.texts.removeAll { $0.id == id } }
         case .audio(let id): edit { $0.audio.removeAll { $0.id == id } }
+        case .overlay(let id): edit { $0.overlays?.removeAll { $0.id == id } }
         case .none: return
         }
         selection = .none
@@ -365,6 +381,14 @@ final class EditorSession: ObservableObject {
             copy.start = project.audio[i].end
             edit { $0.audio.append(copy) }
             selection = .audio(copy.id)
+        case .overlay:
+            guard let i = selectedOverlayIndex else { return }
+            var copy = project.overlayItems[i]
+            copy.id = UUID()
+            copy.start = copy.end
+            guard copy.start < project.duration - 0.3 else { message = "No room after it for a copy."; return }
+            edit { $0.overlays = ($0.overlays ?? []) + [copy] }
+            selection = .overlay(copy.id)
         case .none: break
         }
     }

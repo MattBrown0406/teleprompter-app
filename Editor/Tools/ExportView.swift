@@ -14,6 +14,7 @@ struct ExportView: View {
     @State private var saved: Set<String> = []
     @State private var saveError: String?
     @State private var planning = false
+    @State private var allHooks = true
 
     init(session: EditorSession) {
         _session = ObservedObject(wrappedValue: session)
@@ -26,6 +27,9 @@ struct ExportView: View {
 
     private var project: EditProject { session.project }
     private var ordered: [CanvasFormat] { CanvasFormat.allCases.filter { formats.contains($0) } }
+    /// Hook versions that have a take (the original counts as one).
+    private var hookVersionCount: Int { HookPlanner.versions(project).count }
+    private var versionCount: Int { allHooks ? hookVersionCount : 1 }
 
     var body: some View {
         NavigationStack {
@@ -65,6 +69,16 @@ struct ExportView: View {
                     Text("Pick several shapes to get one video for each platform from the same edit. With face centring on, the crop follows you instead of cutting you off.")
                 }
 
+                if hookVersionCount > 1 {
+                    Section {
+                        Toggle("Export every hook (\(hookVersionCount) versions)", isOn: $allHooks)
+                    } header: {
+                        Text("Hook test")
+                    } footer: {
+                        Text("Each opening line becomes its own video with the same body, so you can post them and see which hook keeps people watching.")
+                    }
+                }
+
                 Section {
                     if exporter.isExporting {
                         VStack(alignment: .leading, spacing: 8) {
@@ -78,7 +92,7 @@ struct ExportView: View {
                     } else if !exporter.outputs.isEmpty {
                         ForEach(exporter.outputs) { out in
                             HStack {
-                                Text(out.format.rawValue).font(.headline).frame(width: 50, alignment: .leading)
+                                Text(out.title).font(.headline).lineLimit(1).frame(minWidth: 50, alignment: .leading)
                                 Button {
                                     Task {
                                         do { try await Exporter.saveToPhotos(out.url); saved.insert(out.id) } catch { saveError = error.localizedDescription }
@@ -109,7 +123,8 @@ struct ExportView: View {
                         }
                     } else {
                         Button { start() } label: {
-                            Text(ordered.count > 1 ? "Export \(ordered.count) videos" : "Export video").font(.headline).frame(maxWidth: .infinity)
+                            let n = ordered.count * versionCount
+                            Text(n > 1 ? "Export \(n) videos" : "Export video").font(.headline).frame(maxWidth: .infinity)
                         }
                         .disabled(analysing)
                     }
@@ -123,6 +138,7 @@ struct ExportView: View {
             .onChange(of: codec) { _, _ in reset() }
             .onChange(of: formats) { _, _ in reset() }
             .onChange(of: reframe) { _, _ in reset() }
+            .onChange(of: allHooks) { _, _ in reset() }
             .interactiveDismissDisabled(exporter.isExporting || analysing)
             .sheet(isPresented: $planning) { AddToCalendarSheet(project: session.project, outputs: exporter.outputs) }
         }
@@ -137,7 +153,16 @@ struct ExportView: View {
                 await session.setAutoReframe(reframe) { p in analyseProgress = p }
                 analysing = false
             }
-            await exporter.export(session.project, formats: ordered, quality: quality, codec: codec)
+            if reframe && versionCount > 1 {
+                analysing = true
+                await session.prepareHookFaces()
+                analysing = false
+            }
+            if versionCount > 1 {
+                await exporter.export(versions: HookPlanner.versions(session.project), formats: ordered, quality: quality, codec: codec)
+            } else {
+                await exporter.export(session.project, formats: ordered, quality: quality, codec: codec)
+            }
             if !exporter.outputs.isEmpty && exporter.error == nil { session.markFinished() }
         }
     }
@@ -150,7 +175,7 @@ struct ExportView: View {
         case (.uhd4K, .h264): 50
         case (.uhd4K, .hevc): 30
         }
-        let mb = mbps * project.duration / 8 * Double(max(1, formats.count))
+        let mb = mbps * project.duration / 8 * Double(max(1, formats.count) * versionCount)
         return mb < 1000 ? "\(Int(mb.rounded())) MB" : String(format: "%.1f GB", mb / 1000)
     }
 }

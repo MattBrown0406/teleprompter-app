@@ -82,12 +82,15 @@ enum FrameRenderer {
         let a = layerImage(instruction.from)
         if let toRef = instruction.to {
             let b = layerImage(toRef)
-            let range = instruction.timeRange
+            let range = instruction.transitionRange
             let p = max(0, min(1, (time - range.start).seconds / max(range.duration.seconds, 0.001)))
             image = Transitions.apply(instruction.transition, from: a, to: b, progress: ease(p), size: size)
         } else {
             image = a
         }
+
+        image = OverlayRenderer.apply(project.overlayItems, to: image, at: t, instruction: instruction, plan: plan,
+                                      size: size, source: source)
 
         let onBrandClip = project.clips.first(where: { $0.id == instruction.from.clipID })?.isBrandClip ?? false
         if let logo = project.logo, !onBrandClip, let mark = plan.logoImage(logo.path) {
