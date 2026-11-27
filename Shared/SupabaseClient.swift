@@ -57,17 +57,31 @@ actor SupabaseClient {
     /// The email of the signed-in account, or nil for the automatic (anonymous) one.
     private(set) var email: String? = KeychainStore.read("supabase.email")
 
+    /// The sign-in in flight, shared by every caller that needs a token meanwhile.
+    private var signingIn: Task<(token: String, userID: String), Error>?
+
     /// A valid access token and the signed-in user id, signing in if needed.
     func session() async throws -> (token: String, userID: String) {
         guard let cfg = SupabaseConfig.current else { throw CloudError.notConfigured }
         if let t = accessToken, let u = userID, expiresAt > Date().addingTimeInterval(60) { return (t, u) }
+        // Project and footage backup ask at the same time. Without this, both would spend the same
+        // refresh token (Supabase rotates it), and the loser could end up on a brand-new account.
+        if let signingIn { return try await signingIn.value }
+        let task = Task { try await self.refreshOrSignUp(cfg) }
+        signingIn = task
+        defer { signingIn = nil }
+        return try await task.value
+    }
 
+    private func refreshOrSignUp(_ cfg: SupabaseConfig) async throws -> (token: String, userID: String) {
         if let refresh = KeychainStore.read(Self.refreshAccount) {
             do {
                 return try await signIn(cfg, path: "token?grant_type=refresh_token", body: ["refresh_token": refresh])
-            } catch CloudError.http(let code, _) where (400..<500).contains(code) {
+            } catch CloudError.http(let code, _) where code == 400 || code == 401 || code == 403 {
                 // The saved sign-in is no longer valid: start a new anonymous account below.
                 // ProjectSync notices the new user id and uploads every local project again.
+                // Anything else (rate limit, server error, offline) is passed on and retried later,
+                // so a busy moment never swaps the account.
             }
         }
         return try await signIn(cfg, path: "signup", body: ["data": [String: String]()])
