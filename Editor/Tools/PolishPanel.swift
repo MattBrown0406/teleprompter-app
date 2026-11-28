@@ -66,6 +66,7 @@ struct PolishPanel: View {
         var firstByPath: [String: ClipItem] = [:]
         for c in clips where firstByPath[c.path] == nil { firstByPath[c.path] = c }
         let paths = Array(firstByPath.keys)
+        let lookup = firstByPath
         let doSound = sound, doLook = look, aLevel = audioStrength, lLevel = lookStrength
         let steps = Double(paths.count * ((doSound ? 1 : 0) + (doLook ? 1 : 0)))
         Task {
@@ -74,7 +75,7 @@ struct PolishPanel: View {
             var done = 0.0
             var problems: [String] = []
             for path in paths {
-                if doLook, let clip = firstByPath[path] {
+                if doLook, let clip = lookup[path] {
                     status = "Checking light and colour…"
                     if let s = try? await LookPolish.measure(clip) { stats[path] = s }
                     done += 1

@@ -125,8 +125,8 @@ enum ClipFinder {
                 let len = s[b].end - s[a].start
                 if len > r.upperBound { break }
                 if len >= r.lowerBound {
-                    let (score, why) = score(s, a, b, target: (r.lowerBound + r.upperBound) / 2)
-                    candidates.append((score, a, b, why))
+                    let rated = score(s, a, b, target: (r.lowerBound + r.upperBound) / 2)
+                    candidates.append((rated.0, a, b, rated.1))
                 }
                 b += 1
             }
