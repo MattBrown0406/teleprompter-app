@@ -36,7 +36,10 @@ struct ToolBar: View {
                     tool("Copy", "plus.square.on.square") { session.duplicateSelection() }
                     tool("Delete", "trash", tint: .red) { session.deleteSelection() }
                 case .none:
+                    tool("Edit by text", "text.word.spacing") { pick(.transcript) }
                     tool("Auto-cut", "wand.and.stars") { pick(.autoCut) }
+                    tool("Polish", "sparkles.tv") { pick(.polish) }
+                    tool("Clips", "rectangle.split.3x1") { pick(.clips) }
                     tool("Captions", "captions.bubble") { pick(.captions) }
                     tool("B-roll", "photo.stack") { pick(.broll) }
                     tool("Hooks", "flag.2.crossed") { pick(.hooks) }
@@ -161,6 +164,8 @@ struct ToolPanel: View {
                 case .overlayEdit: OverlayPanel(session: session)
                 case .hooks: HookPanel(session: session)
                 case .templates: TemplatePanel(session: session)
+                case .polish: PolishPanel(session: session)
+                case .transcript, .clips: EmptyView()
                 case .addClip: EmptyView()
                 }
             }
@@ -194,6 +199,9 @@ struct ToolPanel: View {
         case .overlayEdit: return "B-roll"
         case .hooks: return "Hook test"
         case .templates: return "Templates"
+        case .polish: return "One-tap polish"
+        case .transcript: return "Edit by text"
+        case .clips: return "Make short clips"
         case .addClip: return "Add"
         }
     }
