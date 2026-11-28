@@ -40,6 +40,12 @@ struct ScriptMatcher {
     /// Index of the next word to be said. Words before it have been read.
     private(set) var position = 0
 
+    /// Lets a restarted line pull the position back (the prompter wants this, practice coverage doesn't).
+    var allowsBackJump = false
+    /// How many words of the current pass had been seen at the last update, so revisions
+    /// of words already heard never count as a restart.
+    private var heardCount = 0
+
     init(words: [String]) { self.words = words }
 
     /// Moves to a word, for example after a manual drag or a rewind.
@@ -48,12 +54,18 @@ struct ScriptMatcher {
     }
 
     /// Feeds the words heard so far in the current recognition pass.
-    /// Returns true when the position moved forward.
+    /// Returns true when the position moved (forward, or back after a restarted line).
     @discardableResult
     mutating func update(heard: [String]) -> Bool {
-        guard !words.isEmpty, position < words.count else { return false }
+        // A shorter list means a fresh recognition pass started.
+        let newWords = heard.count > heardCount || (heard.count < heardCount && !heard.isEmpty)
+        heardCount = heard.count
+        guard !words.isEmpty else { return false }
         let tail = Array(heard.suffix(8))
         guard let last = tail.last else { return false }
+        guard position < words.count else {
+            return newWords ? backJump(tail: tail) : false
+        }
 
         // Look a short way ahead first, so repeated phrases later in the script don't pull us forward.
         if let end = bestEnd(tail: tail, last: last, in: max(0, position - 2)...min(words.count - 1, position + 30), near: true) {
@@ -63,6 +75,26 @@ struct ScriptMatcher {
         if tail.count >= 5, position + 31 < words.count,
            let end = bestEnd(tail: tail, last: last, in: (position + 31)...(words.count - 1), near: false) {
             return advance(to: end + 1)
+        }
+        return newWords ? backJump(tail: tail) : false
+    }
+
+    /// A flubbed line said again: the last four words heard match, in order, a run of the script
+    /// that ends at least two words behind where we are. Only fresh words count, so the recognizer
+    /// revising what it already heard can't drag the script back.
+    private mutating func backJump(tail: [String]) -> Bool {
+        guard allowsBackJump, tail.count >= 4 else { return false }
+        let run = Array(tail.suffix(4))
+        guard run.contains(where: { $0.count >= 3 }) else { return false }
+        let latest = position - 2
+        let earliest = max(3, position - 60)
+        guard latest >= earliest else { return false }
+        for end in stride(from: latest, through: earliest, by: -1) {
+            let start = end - 3
+            if (0..<4).allSatisfy({ Self.similar(run[$0], words[start + $0]) }) {
+                position = end + 1
+                return true
+            }
         }
         return false
     }

@@ -4,7 +4,8 @@ import AVFoundation
 /// Which panel is open under the timeline.
 enum EditorTool: String, Identifiable {
     case canvas, background, text, textStyle, captions, music, voiceover, filters, adjust, trim, speed, volume,
-         framing, transition, audioEdit, addClip, autoCut, cleanup, brand, ai, broll, overlayEdit, hooks, templates
+         framing, transition, audioEdit, addClip, autoCut, cleanup, brand, ai, broll, overlayEdit, hooks, templates,
+         transcript, polish, clips
     var id: String { rawValue }
 }
 
@@ -14,6 +15,9 @@ struct EditorView: View {
     @State private var tool: EditorTool?
     @State private var transitionIndex: Int?
     @State private var showExport = false
+    @State private var showTranscript = false
+    @State private var showClips = false
+    @State private var transcriptDetent: PresentationDetent = .large
 
     init(project: EditProject) {
         _session = StateObject(wrappedValue: EditorSession(project: project))
@@ -39,6 +43,9 @@ struct EditorView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             } else {
                 ToolBar(session: session) { picked in
+                    // Editing by text and making clips need the whole screen.
+                    if picked == .transcript { session.pause(); showTranscript = true; return }
+                    if picked == .clips { session.pause(); showClips = true; return }
                     if picked == .transition { transitionIndex = session.activeClipIndex }
                     withAnimation(.snappy) { tool = picked }
                 }
@@ -60,6 +67,17 @@ struct EditorView: View {
         }
         .sheet(isPresented: $showExport) {
             ExportView(session: session).presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showTranscript) {
+            // Half height keeps the video visible above, so press-and-hold previews can be watched.
+            TranscriptEditorView(session: session)
+                .presentationDetents([.medium, .large], selection: $transcriptDetent)
+                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+        }
+        .sheet(isPresented: $showClips) {
+            ClipFinderView(session: session)
+                .presentationDetents([.medium, .large])
+                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
         }
         .overlay(alignment: .top) {
             if let msg = session.message {

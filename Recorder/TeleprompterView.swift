@@ -75,6 +75,20 @@ struct TeleprompterView: View {
             }
             .background(Color.black.opacity(backgroundOpacity), in: RoundedRectangle(cornerRadius: 16))
             .scaleEffect(x: mirrored ? -1 : 1, y: 1)
+            .overlay(alignment: .bottomTrailing) {
+                // After the mirror, so it always reads the right way round.
+                if engine.followsVoice && engine.isScrolling && engine.isOffScript {
+                    Label("Off script, waiting for you", systemImage: "ear")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(.black.opacity(0.55), in: Capsule())
+                        .padding(6)
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: engine.isOffScript)
             .contentShape(Rectangle())
             .onTapGesture { engine.toggle() }
             .gesture(

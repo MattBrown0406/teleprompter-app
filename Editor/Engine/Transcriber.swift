@@ -2,7 +2,7 @@ import AVFoundation
 import Speech
 
 /// A recognised word with its time in the asset (seconds).
-struct SpokenWord: Equatable {
+struct SpokenWord: Codable, Equatable, Hashable {
     var text: String
     var start: Double
     var end: Double

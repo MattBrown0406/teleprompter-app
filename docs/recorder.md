@@ -9,11 +9,12 @@ The Record tab of Cueframe (placeholder name): a teleprompter camera for 9:16 an
 | MovieWriter.swift | AVAssetWriter to .mp4, removes paused gaps so a take with pauses plays as one clip |
 | CameraPreview.swift | Live preview layer and the thirds grid |
 | PrompterEngine.swift | Frame-by-frame script scroll (CADisplayLink): fixed speed, or gliding to where your voice is |
-| ScriptMatcher.swift | Finds your place in the script from the last few words heard (fuzzy, forward only, looks 30 words ahead) |
+| ScriptMatcher.swift | Finds your place in the script from the last few words heard (fuzzy, looks 30 words ahead, follows you back when you restart a line) |
 | SpeechFollower.swift | Speech recognition on the camera's microphone audio, on the phone when supported, restarted every ~50 s |
 | RemoteControl.swift | Apple Watch link, headphone play/pause, volume buttons |
 | SectionTakes.swift | Record in parts: split at blank lines, takes per part, pick the best, join |
-| ScriptWriterView.swift | AI script helper (uses the shared AIClient and the key in AI settings) |
+| ScriptWriterView.swift | AI script writer screen and the My voice screen (uses the shared AIClient and the key in AI settings) |
+| ScriptCraft.swift | Script writer logic: voice profile, reading a link, lengths, calls to action, prompts, parsing hook/body/CTA and platform versions |
 | ../Watch/ | The Apple Watch remote app (CueframeWatch target, embedded in the iPhone app) |
 | TeleprompterView.swift | The script overlay: tap to pause, drag to scroll, pinch to resize, mirror; countdown overlay |
 | ScriptStore.swift / ScriptLibraryView.swift | Saved scripts (Documents/Scripts.json), write, paste, import .txt/.rtf |
@@ -36,6 +37,9 @@ How it records
 
 Teleprompter
 - Follow my voice (on by default): the script moves at your pace and waits when you pause. Words already said are dimmed. Dragging the script or using the arrow keys moves your place too. Needs the microphone and speech recognition permission; if either is off, it falls back to fixed speed or says why.
+  - Pace: recognition reports words in bursts about a beat late, so between reports the scroll keeps moving at your measured speaking rate (smoothed, 1.2 to 5.5 words a second), never more than 1.6 words past the last word heard, and stops within 0.6 s of you pausing.
+  - Restarting a line: if the last four new words you say match, in order, a run of the script at least two words behind your place (within the last 60 words), the script goes back there. Revisions of words already heard never pull it back.
+  - Ad-libbing: after six words that aren't in the script, a small "Off script, waiting for you" tag shows on the prompter. The script holds still and picks up as soon as you're back on it, including if you skip ahead (a jump past 30 words needs five words in a row to agree).
 - Eye-contact layout (on by default): upright, the script is a short band about 3 lines tall and 74% wide right under the lens, read line at the top. Sideways, it is a column a third of the screen wide on the lens side, read line just above the middle, and the controls move to the other side.
 - Record in parts: each paragraph is a part. A kept take moves you to the next part. The Takes list lets you star the best take of each part, re-record a part, and join the best takes in the editor.
 
@@ -65,8 +69,14 @@ Remotes
 - Volume up (and Bluetooth selfie remotes, which send volume up): start or stop recording. Volume down: start or pause the script.
 - Bluetooth page turners and keyboards: space, arrows and Return as before.
 
-Script helper: Scripts, +, Write with AI (or Tighten with AI in the script editor). Topic or notes in, 30/60/90 seconds and a tone, out comes a script with a hook first, short paragraphs and a call to action. Uses the Anthropic or OpenAI key from AI settings.
+Script writer: Scripts, +, Write with AI (or Tighten with AI in the script editor, or long-press a script, Make platform versions).
+- In: a topic, rough notes, a link (the page is fetched on the phone and its main text sent to the AI as source; logins, paywalls and video pages can't be read), or a finished script.
+- Choices: 15 s, 30 s, 1 min, 90 s or 3 min (at 150 words a minute); tone; call to action (best fit, follow, comment, save, share, link in bio, or your own words).
+- Write in my voice: My voice holds a few lines about you and up to 3 saved scripts that sound like you. Both go into the prompt as style guidance. Kept on the phone only.
+- Out: title, hook, body and call to action shown separately. "Show 3 other hooks" gives alternatives; tap one to swap it in. Use this script saves it with the hook, body and call to action as separate paragraphs (so they become parts when recording in parts).
+- Platform versions: one tap turns the draft (or the script in the box) into a TikTok (20 to 35 s, follow/comment), Instagram Reel (30 to 60 s, save/share) and Facebook (45 to 90 s, comment/share) version. Save each, or all, to Scripts as "Title · TikTok" and so on.
+- Uses the Anthropic or OpenAI key from AI settings. Each script costs the AI provider's usual per-use price (a few cents at most).
 
 Hand-off: "Edit" calls `EditorLauncher.open(urls:canvas:quality:)` after the review closes.
 
-Not yet tested on a device, including practice mode, series recording, the background effect, voice following, the Watch app, headphone and volume-button remotes. Needs to be built in Xcode (or CI) and tried on an iPhone.
+Not yet tested on a device, including the pace and restart behaviour of voice following, the script writer's link reading, practice mode, series recording, the background effect, voice following, the Watch app, headphone and volume-button remotes. Needs to be built in Xcode (or CI) and tried on an iPhone.

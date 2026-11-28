@@ -11,6 +11,8 @@ struct ScriptLibraryView: View {
     @State private var importing = false
     @State private var importError: String?
     @State private var writing = false
+    /// A saved script to turn into TikTok, Reel and Facebook versions.
+    @State private var adapting: Script?
     @State private var settingUpSeries = false
 
     var body: some View {
@@ -39,6 +41,7 @@ struct ScriptLibraryView: View {
                     }
                     .contextMenu {
                         Button { editing = script } label: { Label("Edit", systemImage: "pencil") }
+                        Button { adapting = script } label: { Label("Make platform versions", systemImage: "rectangle.stack") }
                         Button(role: .destructive) { store.delete(script) } label: { Label("Delete", systemImage: "trash") }
                     }
                 }
@@ -66,7 +69,7 @@ struct ScriptLibraryView: View {
                 }
             }
             .sheet(item: $editing) { script in
-                ScriptEditorView(script: script) { saved in
+                ScriptEditorView(script: script, store: store) { saved in
                     store.save(saved)
                     store.selectedID = saved.id
                 }
@@ -81,9 +84,15 @@ struct ScriptLibraryView: View {
                 }
             }
             .sheet(isPresented: $writing) {
-                ScriptWriterView { script in
+                ScriptWriterView(store: store) { script in
                     store.save(script)
                     store.selectedID = script.id
+                }
+            }
+            .sheet(item: $adapting) { script in
+                ScriptWriterView(store: store, initialNotes: script.body) { made in
+                    store.save(made)
+                    store.selectedID = made.id
                 }
             }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text, .rtf]) { result in
@@ -122,6 +131,7 @@ struct ScriptLibraryView: View {
 
 struct ScriptEditorView: View {
     @State var script: Script
+    var store: ScriptStore? = nil
     var onSave: (Script) -> Void
     @Environment(\.dismiss) private var dismiss
     @FocusState private var bodyFocused: Bool
@@ -162,7 +172,7 @@ struct ScriptEditorView: View {
             }
             .onAppear { if script.body.isEmpty { bodyFocused = true } }
             .sheet(isPresented: $rewriting) {
-                ScriptWriterView(initialNotes: script.body) { draft in
+                ScriptWriterView(store: store, initialNotes: script.body) { draft in
                     script.body = draft.body
                     if script.title.trimmingCharacters(in: .whitespaces).isEmpty { script.title = draft.title }
                 }
