@@ -37,6 +37,9 @@ struct EditProject: Codable, Identifiable, Equatable, Hashable {
     var pendingTemplateID: UUID?
     /// Caption style to auto-caption with when the editor opens (from a template).
     var pendingCaptions: CaptionPreset?
+    /// Speech-to-text of each source file (keyed by clip path, times in source seconds).
+    /// Made once by the transcript editor or the clip finder and reused after cuts.
+    var spokenWords: [String: [SpokenWord]]?
 
     var isFinished: Bool { finishedAt != nil }
 

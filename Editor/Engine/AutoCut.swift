@@ -64,8 +64,13 @@ enum AutoCut {
             let range = CMTimeRange(start: clip.trimStart.cmTime, duration: clip.trimmedDuration.cmTime)
             var words: [SpokenWord] = []
             do {
-                words = try await Transcriber.transcribe(asset: asset, range: range) { p in
-                    progress(label + "listening…", (Double(n) + p * 0.7) / Double(clips.count))
+                if let cached = project.spokenWords?[clip.path] {
+                    // Already heard by the transcript editor: no need to listen again.
+                    words = cached.filter { ($0.start + $0.end) / 2 >= clip.trimStart && ($0.start + $0.end) / 2 < clip.effectiveTrimEnd }
+                } else {
+                    words = try await Transcriber.transcribe(asset: asset, range: range) { p in
+                        progress(label + "listening…", (Double(n) + p * 0.7) / Double(clips.count))
+                    }
                 }
             } catch is CancellationError {
                 throw CancellationError()
