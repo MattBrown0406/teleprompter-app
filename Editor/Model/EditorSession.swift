@@ -93,6 +93,7 @@ final class EditorSession: ObservableObject {
         redoStack.append(project)
         var restored = prev
         restored.finishedAt = project.finishedAt   // undo changes the edit, not whether it was exported
+        restored.spokenWords = project.spokenWords // heard words belong to the files, not to the edit
         project = restored
         lastCoalesceKey = nil
         afterChange()
@@ -103,6 +104,7 @@ final class EditorSession: ObservableObject {
         undoStack.append(project)
         var restored = next
         restored.finishedAt = project.finishedAt
+        restored.spokenWords = project.spokenWords
         project = restored
         lastCoalesceKey = nil
         afterChange()

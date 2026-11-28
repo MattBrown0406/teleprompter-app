@@ -86,11 +86,21 @@ enum LinkReader {
         let (data, response) = try await URLSession.shared.data(for: request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else { throw Failure.unreadable(code) }
-        let html = String(data: data.prefix(3_000_000), encoding: .utf8)
-            ?? String(data: data.prefix(3_000_000), encoding: .isoLatin1) ?? ""
+        // Cutting a big page can split a multi-byte character, which makes a strict UTF-8 read fail
+        // and turns the whole page into garbled Latin-1. Decode leniently instead.
+        let head = data.prefix(3_000_000)
+        let html = String(data: head, encoding: .utf8)
+            ?? (Self.declaresLatin1(head) ? String(data: head, encoding: .isoLatin1) : nil)
+            ?? String(decoding: head, as: UTF8.self)
         let page = extract(html: html, url: url)
         guard page.text.count >= 200 else { throw Failure.tooLittle }
         return page
+    }
+
+    /// True when the page says it is in a Latin-1 style encoding rather than UTF-8.
+    private static func declaresLatin1(_ data: Data) -> Bool {
+        let start = String(decoding: data.prefix(2048), as: UTF8.self).lowercased()
+        return start.contains("iso-8859-1") || start.contains("windows-1252") || start.contains("latin1")
     }
 
     /// Pulls the title and the main text out of a page. Plain text pages pass straight through.
@@ -381,6 +391,10 @@ enum ScriptPrompt {
                 guard let range = line.range(of: #"^\s*(\d+[\.\)]|[-•*])\s*"#, options: .regularExpression) else { return nil }
                 let hook = line[range.upperBound...].trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: "\"*\u{201C}\u{201D}")))
                 return hook.isEmpty ? nil : hook
+            }
+            .reduce(into: [String]()) { list, hook in
+                // Each hook is shown once (they're the list's identity).
+                if !list.contains(hook) { list.append(hook) }
             }
             .prefix(3).map { $0 }
     }

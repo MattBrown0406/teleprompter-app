@@ -311,7 +311,8 @@ struct ScriptWriterView: View {
             do {
                 let text = try await ai.complete(system: ScriptPrompt.hooksSystem,
                                                  prompt: ScriptPrompt.hooks(for: draft, voice: voice), maxTokens: 800)
-                let hooks = ScriptPrompt.parseHooks(text)
+                // Leave out the hook already in use, so swapping never shows the same line twice.
+                let hooks = ScriptPrompt.parseHooks(text).filter { $0 != draft.hook }
                 if hooks.isEmpty { throw AIError.empty }
                 hookOptions = hooks
             } catch {

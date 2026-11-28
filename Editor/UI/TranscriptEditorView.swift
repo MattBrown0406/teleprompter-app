@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// Edit by text: the take as words. Strike out words or pauses, and the video is cut to match.
 struct TranscriptEditorView: View {
@@ -56,6 +57,11 @@ struct TranscriptEditorView: View {
         }
         .preferredColorScheme(.dark)
         .task { await load() }
+        // The editor stays usable behind the half-height sheet: follow any change made there,
+        // so cuts are never worked out from clips that have since been trimmed or removed.
+        .onReceive(session.$project.dropFirst()) { p in
+            if working == nil { reload(p) }
+        }
     }
 
     private var controls: some View {
@@ -117,8 +123,9 @@ struct TranscriptEditorView: View {
         reload()
     }
 
-    private func reload() {
-        tokens = Transcript.tokens(session.project)
+    private func reload(_ project: EditProject? = nil) {
+        // @Published sends the new value before the property changes, so use it when given.
+        tokens = Transcript.tokens(project ?? session.project)
         struck = struck.filter { id in tokens.contains { $0.id == id } }
         anchor = nil
     }
